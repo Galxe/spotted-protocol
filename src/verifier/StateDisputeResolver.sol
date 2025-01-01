@@ -69,7 +69,10 @@ contract StateDisputeResolver is
     }
 
     // submit challenge for invalid state claim
-    function submitChallenge(address operator, uint32 taskNum) external payable nonReentrant {
+    function submitChallenge(
+        address operator, 
+        bytes32 taskId
+    ) external payable nonReentrant {
         // check bond amount using constant
         if (msg.value < CHALLENGE_BOND) {
             revert StateDisputeResolver__InsufficientBond();
@@ -77,7 +80,7 @@ contract StateDisputeResolver is
 
         // get task response
         ISpottedServiceManager.TaskResponse memory response =
-            ISpottedServiceManager(serviceManager).getTaskResponse(operator, taskNum);
+            ISpottedServiceManager(serviceManager).getTaskResponse(operator, taskId);
 
         // verify task exists
         if (response.responseBlock == 0) {
@@ -98,7 +101,7 @@ contract StateDisputeResolver is
             revert StateDisputeResolver__OperatorNotRegistered();
         }
 
-        bytes32 challengeId = keccak256(abi.encodePacked(operator, taskNum));
+        bytes32 challengeId = keccak256(abi.encodePacked(operator, taskId));
 
         if (challenges[challengeId].challenger != address(0)) {
             revert StateDisputeResolver__ChallengeAlreadyExists();
@@ -114,14 +117,17 @@ contract StateDisputeResolver is
         });
 
         // Mark task as challenged
-        ISpottedServiceManager(serviceManager).handleChallengeSubmission(operator, taskNum);
+        ISpottedServiceManager(serviceManager).handleChallengeSubmission(operator, taskId);
 
         emit ChallengeSubmitted(challengeId, msg.sender);
     }
 
     // everyone can call resolves submitted challenge
-    function resolveChallenge(address operator, uint32 taskNum) external nonReentrant {
-        bytes32 challengeId = keccak256(abi.encodePacked(operator, taskNum));
+    function resolveChallenge(
+        address operator, 
+        bytes32 taskId
+    ) external nonReentrant {
+        bytes32 challengeId = keccak256(abi.encodePacked(operator, taskId));
         Challenge storage challenge = challenges[challengeId];
 
         if (challenge.resolved) {
@@ -134,7 +140,7 @@ contract StateDisputeResolver is
 
         // get task response to get chainId
         ISpottedServiceManager.TaskResponse memory response =
-            ISpottedServiceManager(serviceManager).getTaskResponse(operator, taskNum);
+            ISpottedServiceManager(serviceManager).getTaskResponse(operator, taskId);
 
         // get verified state from MainChainVerifier
         (uint256 actualValue, bool exist) = IMainChainVerifier(mainChainVerifier).getVerifiedState(
@@ -160,7 +166,9 @@ contract StateDisputeResolver is
 
         // Notify service manager of resolution
         ISpottedServiceManager(serviceManager).handleChallengeResolution(
-            operator, taskNum, challengeSuccessful
+            operator, 
+            taskId,
+            challengeSuccessful
         );
 
         emit ChallengeResolved(challengeId, challengeSuccessful);

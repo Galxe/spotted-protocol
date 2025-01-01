@@ -55,9 +55,15 @@ interface IStateDisputeResolver {
     // Core functions
     function initialize(uint32 _operatorSetId, uint256 _slashAmount) external;
 
-    function submitChallenge(address operator, uint32 taskNum) external payable;
+    function submitChallenge(
+        address operator,
+        bytes32 taskId
+    ) external payable;
 
-    function resolveChallenge(address operator, uint32 taskNum) external;
+    function resolveChallenge(
+        address operator,
+        bytes32 taskId
+    ) external;
 
     function setOperatorSetId(
         uint32 newSetId

@@ -25,9 +25,7 @@ contract SpottedServiceManager is
     using ECDSAUpgradeable for bytes32;
 
     // Task tracking
-    uint32 public latestTaskNum;
-    mapping(uint32 => bytes32) public allTaskHashes;
-    mapping(address => mapping(uint32 => TaskResponse)) private _taskResponses;
+    mapping(address => mapping(bytes32 => TaskResponse)) private _taskResponses;
 
     // State variables
     IStateDisputeResolver public immutable disputeResolver;
@@ -89,34 +87,25 @@ contract SpottedServiceManager is
 
     function respondToTask(
         Task calldata task,
-        uint32 referenceTaskIndex,
         bytes memory signatureData
     ) external override whenNotPaused onlyTaskResponseConfirmer {
+        // 验证taskId是否正确生成
+        bytes32 computedTaskId = generateTaskId(
+            task.user,
+            task.chainId,
+            task.blockNumber,
+            task.key,
+            task.value
+        );
+        if (computedTaskId != task.taskId) {
+            revert SpottedServiceManager__InvalidTaskId();
+        }
+
         // Decode signature data
         (address[] memory operators,,) = abi.decode(signatureData, (address[], bytes[], uint32));
 
-        // Check if any of the operators has already responded
-        uint256 operatorsLength = operators.length;
-        for (uint256 i = 0; i < operatorsLength;) {
-            if (_taskResponses[operators[i]][referenceTaskIndex].resolved) {
-                revert SpottedServiceManager__TaskAlreadyResponded();
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        bytes32 messageHash = keccak256(
-            abi.encodePacked(referenceTaskIndex, task.chainId, task.blockNumber, task.value)
-        );
-
-        if (allTaskHashes[referenceTaskIndex] != bytes32(0)) {
-            if (keccak256(abi.encode(task)) != allTaskHashes[referenceTaskIndex]) {
-                revert SpottedServiceManager__TaskHashMismatch();
-            }
-        }
-
-        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+        // 直接使用 taskId 作为消息哈希
+        bytes32 ethSignedMessageHash = task.taskId.toEthSignedMessageHash();
         bytes4 magicValue = IERC1271Upgradeable.isValidSignature.selector;
 
         // verify quorum signatures
@@ -128,11 +117,13 @@ contract SpottedServiceManager is
         ) {
             revert SpottedServiceManager__InvalidSignature();
         }
+
         // record response for each signing operator
+        uint256 operatorsLength = operators.length;
         for (uint256 i = 0; i < operatorsLength;) {
-            _taskResponses[operators[i]][referenceTaskIndex] = TaskResponse({
+            _taskResponses[operators[i]][task.taskId] = TaskResponse({
                 task: task,
-                responseBlock: block.number,
+                responseBlock: uint64(block.number),
                 challenged: false,
                 resolved: false
             });
@@ -141,32 +132,27 @@ contract SpottedServiceManager is
             }
         }
 
-        if (referenceTaskIndex >= latestTaskNum) {
-            allTaskHashes[referenceTaskIndex] = messageHash;
-            latestTaskNum = referenceTaskIndex + 1;
-        }
-
-        emit TaskResponded(referenceTaskIndex, task, msg.sender);
+        emit TaskResponded(task.taskId, task, msg.sender);
     }
 
     function handleChallengeSubmission(
         address operator,
-        uint32 taskNum
+        bytes32 taskId
     ) external onlyDisputeResolver {
-        TaskResponse storage response = _taskResponses[operator][taskNum];
+        TaskResponse storage response = _taskResponses[operator][taskId];
         if (response.challenged) {
             revert SpottedServiceManager__TaskAlreadyChallenged();
         }
         response.challenged = true;
-        emit TaskChallenged(operator, taskNum);
+        emit TaskChallenged(operator, taskId);
     }
 
     function handleChallengeResolution(
         address operator,
-        uint32 taskNum,
+        bytes32 taskId,
         bool challengeSuccessful
     ) external onlyDisputeResolver {
-        TaskResponse storage response = _taskResponses[operator][taskNum];
+        TaskResponse storage response = _taskResponses[operator][taskId];
         if (!response.challenged) {
             revert SpottedServiceManager__TaskNotChallenged();
         }
@@ -175,7 +161,7 @@ contract SpottedServiceManager is
         }
 
         response.resolved = true;
-        emit ChallengeResolved(operator, taskNum, challengeSuccessful);
+        emit ChallengeResolved(operator, taskId, challengeSuccessful);
     }
 
     function registerOperatorToAVS(
@@ -185,17 +171,27 @@ contract SpottedServiceManager is
         _registerOperatorToAVS(operator, operatorSignature);
     }
 
-    function getTaskHash(
-        uint32 taskNum
-    ) external view returns (bytes32) {
-        return allTaskHashes[taskNum];
-    }
-
     function getTaskResponse(
         address operator,
-        uint32 taskNum
+        bytes32 taskId
     ) external view override returns (TaskResponse memory) {
-        return _taskResponses[operator][taskNum];
+        return _taskResponses[operator][taskId];
+    }
+    
+    function generateTaskId(
+        address user,
+        uint32 chainId,
+        uint64 blockNumber,
+        uint256 key,
+        uint256 value
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            user,
+            chainId,
+            blockNumber,
+            key,
+            value
+        ));
     }
 
     function _setTaskResponseConfirmer(address confirmer, bool status) internal {

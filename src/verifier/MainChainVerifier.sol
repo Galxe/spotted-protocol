@@ -14,7 +14,6 @@ contract MainChainVerifier is Ownable2Step, IMainChainVerifier {
         verifiedStates; // chainId -> user -> key -> blockNumber -> Value
 
     // core contract references
-    address public immutable disputeResolver;
     IAbridge public immutable abridge;
 
     // remote verifier configuration
@@ -28,19 +27,11 @@ contract MainChainVerifier is Ownable2Step, IMainChainVerifier {
         _;
     }
 
-    modifier onlyDisputeResolver() {
-        if (msg.sender != disputeResolver) {
-            revert MainChainVerifier__OnlyDisputeResolver();
-        }
-        _;
-    }
-
-    constructor(address _abridge, address _disputeResolver, address _owner) Ownable(_owner) {
-        if (_abridge == address(0) || _disputeResolver == address(0)) {
+    constructor(address _abridge, address _owner) Ownable(_owner) {
+        if (_abridge == address(0)) {
             revert MainChainVerifier__InvalidResponse();
         }
         abridge = IAbridge(_abridge);
-        disputeResolver = _disputeResolver;
     }
 
     // configures verifier address for a specific chain

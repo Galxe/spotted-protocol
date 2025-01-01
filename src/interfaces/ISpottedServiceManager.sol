@@ -19,28 +19,30 @@ interface ISpottedServiceManager {
     error SpottedServiceManager__TaskAlreadyResolved();
     error SpottedServiceManager__CallerNotTaskResponseConfirmer();
     error SpottedServiceManager__InvalidAddress();
+    error SpottedServiceManager__InvalidTaskId();
     // Events
-
     event TaskResponseConfirmerSet(address confirmer, bool status);
-    event TaskResponded(uint32 indexed taskIndex, Task task, address indexed operator);
-    event TaskChallenged(address indexed operator, uint32 indexed taskNum);
+    event TaskResponded(bytes32 indexed taskId, Task task, address indexed operator);
+    event TaskChallenged(address indexed operator, bytes32 indexed taskId);
     event ChallengeResolved(
-        address indexed operator, uint32 indexed taskNum, bool challengeSuccessful
+        address indexed operator,
+        bytes32 indexed taskId,
+        bool challengeSuccessful
     );
 
     // Task struct
     struct Task {
+        bytes32 taskId;
         address user;
         uint32 chainId;
         uint64 blockNumber;
-        uint32 taskCreatedBlock;
         uint256 key;
         uint256 value;
     }
 
     struct TaskResponse {
         Task task;
-        uint256 responseBlock;
+        uint64 responseBlock;
         bool challenged;
         bool resolved;
     }
@@ -48,26 +50,23 @@ interface ISpottedServiceManager {
     // Core functions
     function respondToTask(
         Task calldata task,
-        uint32 referenceTaskIndex,
         bytes memory signature
     ) external;
 
-    function handleChallengeSubmission(address operator, uint32 taskNum) external;
+    function handleChallengeSubmission(
+        address operator,
+        bytes32 taskId
+    ) external;
 
     function handleChallengeResolution(
         address operator,
-        uint32 taskNum,
+        bytes32 taskId,
         bool challengeSuccessful
     ) external;
 
     // View functions
     function getTaskResponse(
         address operator,
-        uint32 taskNum
+        bytes32 taskId
     ) external view returns (TaskResponse memory);
-
-    function getTaskHash(
-        uint32 taskNum
-    ) external view returns (bytes32);
-    function latestTaskNum() external view returns (uint32);
 }

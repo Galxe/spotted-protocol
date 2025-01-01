@@ -1,96 +1,123 @@
-
 # StateManager
 
 | File | Type | Proxy |
 | -------- | -------- | -------- |
-| `StateManager.sol` | Singleton | - |
+| `StateManager.sol` | Singleton(mainnet and supported chains) | No proxy |
 
-`StateManager` is responsible for managing state transitions and history for users, and it allows operators and users to create, read, and update states. It supports two types of states:
-- Immutable states: Once committed, these states cannot be modified
-- Monotonic states: Each new state value must be strictly greater than the previous value
-
-The primary goal of the `StateManager` is to provide a verifiable and queryable history of state changes that can be used to:
-- Track user state transitions over time
-- Verify state values at specific blocks
-- Support efficient state queries and lookups
+`StateManager` is responsible for managing state transitions and history for users. Users can set arbitrary key-value pairs states in the contract. It supports immutable and monotonic (increasing/decreasing) states with comprehensive history tracking and querying capabilities.
 
 ## High-level Concepts
 
-1. State Commitment
-2. State Queries
-3. State Verification
+1. State Management
+2. History Tracking
+3. Binary Search Optimization
+4. Batch Operations
+5. State Validation
 
 ## Important Definitions
 
-- _State_: A struct containing:
-  - value: The actual state value (bytes32)
-  - timestamp: When the state was committed
-  - blockNumber: Block number when committed
-  - nonce: Monotonically increasing counter per user
-  - stateType: IMMUTABLE or MONOTONIC
-  - metadata: Optional associated data
-- _State History_: The ordered sequence (array) of states for a user, stored in userStates[address][]. Each new state is appended to this array.
----
-## State Commitment (Create)
-The state commitment process allows users to record new states. For immutable states, the value cannot be changed once set. For monotonic states, each new value must be greater than the previous value.
-
-Methods:
-`commitState`
-
+- _ValueInfo_: Current state information
 ```solidity
-function commitState(
-    bytes32 value,
-    StateType stateType,
-    bytes calldata metadata
-) external returns (uint256, uint256)
+struct ValueInfo {
+    uint256 value;      // Current value
+    uint8 stateType;    // State type (IMMUTABLE, MONOTONIC_INCREASING, MONOTONIC_DECREASING)
+    bool exists;        // Whether the state exists
+}
 ```
 
-Commits a new state for the caller. The state is appended to the user's state history with a new nonce. For monotonic states, the value must be greater than the previous state value.
+- _History_: Historical state record
+```solidity
+struct History {
+    uint256 value;      // State value
+    uint64 blockNumber; // Block number when committed
+    uint32 timestamp;   // Timestamp when committed
+    uint32 nonce;       // Sequential number
+    uint8 stateType;    // State type when committed
+}
+```
 
-Effects:
-Creates and stores a new State struct with:
-- Current block number and timestamp
-- Next sequential nonce for the user
-- Provided value, type and metadata
-- Emits StateCommitted event with state details
-Returns the previous and new state values
-Requirements:
-- stateType must be either IMMUTABLE or MONOTONIC
-- For MONOTONIC type, new value must be greater than previous value
-- Previous state must exist if type is MONOTONIC
+## Core State Management
 
----
+### State Setting
+```solidity
+function setValue(uint256 key, uint256 value, StateType stateType) external
+```
 
-## State Queries (Read)
-The `StateManager` provides several methods to query historical states. These methods support different query patterns like:
-- Latest state value
-- State at a specific block
-- States within a block range
-- Recent state changes
+Sets or updates a state value with validation:
+- Prevents modification of immutable states
+- Enforces monotonic rules for increasing/decreasing states
+- Records state history
+- Tracks user keys
 
-Methods:
-- `latest`
-- `getStateAtBlock`
-- `getStateChangesBetween`
-- `getLatestStates`
+### Batch Operations
+```solidity
+function batchSetValues(SetValueParams[] calldata params) external
+```
 
-Returns the state value that was active at a specific block number. Uses binary search for efficient lookup.
-Returns:
-- The state value at the specified block
-- 0 if no state existed at that block
-Requirements:
-- blockNumber must be less than current block
-- User must have state history
----
-## State Verification (Update)
-It allows checking state validity and querying state proofs. 
-Methods:
-- `getStateSnapshots`
-- `getStateByBlockNumber`
+Processes multiple state updates in a single transaction:
+- Maximum 100 updates per batch
+- Same validation rules as single updates
+- More gas efficient for multiple updates
 
-The verification flow:
-1. Getting state snapshots for specific blocks
-2. Verifying the snapshots against block roots
-3. Confirming state transitions are valid
-This enables secure state verification across different chains while maintaining the integrity of state history.
+## History Management
+
+### Binary Search Optimization
+The contract uses an optimized binary search algorithm for efficient history queries:
+- Supports both block number and timestamp based searches
+- O(log n) complexity for finding specific records
+- Handles edge cases and bounds checking
+
+### History Query Patterns
+
+1. Range Queries:
+- `getHistoryBetweenBlockNumbers`: Get history between block numbers
+- `getHistoryBetweenTimestamps`: Get history between timestamps
+- `getHistoryBeforeBlockNumber`: Get history before a block
+- `getHistoryAfterBlockNumber`: Get history after a block
+- `getHistoryBeforeTimestamp`: Get history before a timestamp
+- `getHistoryAfterTimestamp`: Get history after a timestamp
+
+2. Point Queries:
+- `getHistoryAtBlock`: Get state at specific block
+- `getHistoryAtTimestamp`: Get state at specific timestamp
+- `getHistoryAt`: Get state at specific index
+
+## State Validation
+
+### Monotonic State Validation
+Functions to verify monotonic properties:
+- `checkIncreasingValueAtBlock`: Verify increasing state at block
+- `checkDecreasingValueAtBlock`: Verify decreasing state at block
+- `checkIncreasingValueAtTimestamp`: Verify increasing state at timestamp
+- `checkDecreasingValueAtTimestamp`: Verify decreasing state at timestamp
+
+## View Functions
+
+### Current State Queries
+- `getCurrentValue`: Get current state for a key
+- `getCurrentValues`: Batch get current states for multiple keys
+- `getUsedKeys`: Get all keys used by an address
+
+### History Queries
+- `getHistoryCount`: Get total history count for a key
+- `getLatestHistory`: Get N most recent history records
+- `checkKeysStateTypes`: Get state types for multiple keys
+
+## Events
+
+```solidity
+event HistoryCommitted(
+    address indexed user,
+    uint256 indexed key,
+    uint256 value,
+    uint256 timestamp,
+    uint256 blockNumber,
+    uint256 nonce,
+    StateType stateType
+)
+```
+
+Emitted when:
+- New state is committed
+- Batch states are committed
 

@@ -7,7 +7,6 @@ import {IAbridge} from "../interfaces/IAbridge.sol";
 interface IMainChainVerifier is IAbridgeMessageHandler {
     // Errors
     error MainChainVerifier__OnlyAbridge();
-    error MainChainVerifier__OnlyDisputeResolver();
     error MainChainVerifier__InvalidResponse();
     error MainChainVerifier__UnauthorizedRemoteVerifier();
 
@@ -27,7 +26,6 @@ interface IMainChainVerifier is IAbridgeMessageHandler {
     );
     event RemoteVerifierSet(uint256 indexed chainId, address verifier);
 
-    function disputeResolver() external view returns (address);
     function abridge() external view returns (IAbridge);
     function remoteVerifiers(
         uint256 chainId

@@ -1,66 +1,89 @@
-## Foundry
+# Cross-Chain State Oracle (Spotted)
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Spotted is an AVS (Actively Validated Service) built on EigenLayer that enables cross-chain state queries. 
 
-Foundry consists of:
+## Key Features
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+1. **Off-chain Task Generation**
+- Tasks are generated and assigned directly by task generator to operators
 
-## Documentation
+1. **ECDSA Signature Verification**
+- Uses ECDSA signatures for task responses
+- Minimizes gas costs compared to BLS
 
-https://book.getfoundry.sh/
+1. **Cross-Chain State Verification**
+- Verifies state claims across different chains
+- Challenge-based dispute resolution system
+- Bridge protocol integration for state proof verification (challenge)
 
-## Usage
+## Architecture Overview
 
-### Build
+### Core Components
 
-```shell
-$ forge build
-```
+1. **Service Management**
+- SpottedServiceManager: Main AVS contract
+- Task record and response verification
 
-### Test
+AVS (SpottedServiceManager)
+-> ECDSAServiceManagerBase
+-> AVSDirectory (Registration status)
 
-```shell
-$ forge test
-```
+1. **Registry System**
 
-### Format
+Operator
+-> RegistryCoordinator (Business logic)
+-> StakeRegistry (Stake management)
+-> IndexRegistry (Quorum management)
 
-```shell
-$ forge fmt
-```
 
-### Gas Snapshots
+3. **State Verification**
+- CrossChainStateVerifier: Verifies cross-chain states
+- BridgeVerifier: Protocol-specific state proof verification
+- Challenge mechanism for dispute resolution
 
-```shell
-$ forge snapshot
-```
+### Security Model
 
-### Anvil
+1. **EigenLayer Integration**
+- Leverages restaking for economic security
+- Slashing for malicious behavior
+- Operator stake requirements
 
-```shell
-$ anvil
-```
+1. **Challenge System**
+- Allows challenging invalid state claims
+- Bond requirement for challengers
+- Slashing penalties for proven violations
 
-### Deploy
+## Key Workflows
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+1. **Operator Registration**
+- Register with EigenLayer
+- Meet stake requirements
+- Join specific quorums
 
-### Cast
+2. **Task Execution**
+- Task generator generates off-chain task
+- Operator processes and signs response
+- Response verified through ECDSA signatures
 
-```shell
-$ cast <subcommand>
-```
+1. **Challenge**
+`StateDisputeResolver::submitChallenge`  
+-> `RemoteChainVerifier::verifyState`  
+-> `MainChainVerifier::handleMessage (receive and update mapping)` 
+-> `StateDisputeResolver::resolveChallenge (verify mapping)`
 
-### Help
+## Integration
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+1. **EigenLayer Core**
+- Delegation Manager
+- Strategy Manager
+
+1. **Bridge Protocols**
+- LayerZero (planned)
+- Chainlink CCIP (planned)
+- Other cross-chain messaging protocols
+
+## Roles
+Staker: delegate/undelegate through EigenLayer core contracts
+Operator: register/unregister through RegistryCoordinator
+Task Generator: generate tasks off chain directly to operators
+Bridge Verifier: verify state proofs (only when challenged) from bridge protocols

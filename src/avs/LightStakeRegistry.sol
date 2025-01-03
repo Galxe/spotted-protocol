@@ -15,12 +15,9 @@ import {SignatureCheckerUpgradeable} from
     "@openzeppelin-upgrades/contracts/utils/cryptography/SignatureCheckerUpgradeable.sol";
 import {IERC1271Upgradeable} from
     "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
-import {IRegistryStateSender} from "../interfaces/IRegistryStateSender.sol";
+import {ILightStakeRegistry} from "../interfaces/ILightStakeRegistry.sol";
 
-/// @title ECDSA Stake Registry
-/// @dev THIS CONTRACT IS NOT AUDITED
-/// @notice Manages operator registration and quorum updates for an AVS using ECDSA signatures.
-contract ECDSAStakeRegistry is
+contract LightStakeRegistry is
     IERC1271Upgradeable,
     OwnableUpgradeable,
     ECDSAStakeRegistryStorage
@@ -45,26 +42,20 @@ contract ECDSAStakeRegistry is
         uint256 _thresholdWeight,
         Quorum memory _quorum
     ) external initializer {
-        __ECDSAStakeRegistry_init(_serviceManager, _thresholdWeight, _quorum);
+        __LightStakeRegistry_init(_serviceManager, _thresholdWeight, _quorum);
     }
 
-    /// @notice Registers a new operator using a provided signature and signing key
-    /// @param _operatorSignature Contains the operator's signature, salt, and expiry
-    /// @param _signingKey The signing key to add to the operator's history
-    function registerOperatorWithSignature(
-        ISignatureUtils.SignatureWithSaltAndExpiry memory _operatorSignature,
+    /// @notice Registers a new operator
+    function registerOperator(
+        address _operator,
         address _signingKey
     ) external {
-        _registerOperatorWithSig(msg.sender, _operatorSignature, _signingKey);
-        IServiceManager(_serviceManager).registerOperatorToAVS(msg.sender, _operatorSignature);
-        IRegistryStateSender(_registryStateSender).registerOperator(msg.sender, _signingKey);
+        _registerOperatorWithSig(_operator, _signingKey);
     }
 
     /// @notice Deregisters an existing operator
-    function deregisterOperator() external {
-        _deregisterOperator(msg.sender);
-        IServiceManager(_serviceManager).deregisterOperatorFromAVS(msg.sender);
-        IRegistryStateSender(_registryStateSender).deregisterOperator(msg.sender);
+    function deregisterOperator(address _operator) external {
+        _deregisterOperator(_operator);
     }
 
     /**
@@ -73,13 +64,13 @@ contract ECDSAStakeRegistry is
      * @param _newSigningKey The new signing key to set for the operator
      */
     function updateOperatorSigningKey(
+        address _operator,
         address _newSigningKey
     ) external {
-        if (!_operatorRegistered[msg.sender]) {
+        if (!_operatorRegistered[_operator]) {
             revert OperatorNotRegistered();
         }
-        _updateOperatorSigningKey(msg.sender, _newSigningKey);
-        IRegistryStateSender(_registryStateSender).updateOperatorSigningKey(msg.sender, _newSigningKey);
+        _updateOperatorSigningKey(_operator, _newSigningKey);
     }
 
     /**
@@ -91,7 +82,6 @@ contract ECDSAStakeRegistry is
         address[] memory _operators
     ) external {
         _updateOperators(_operators);
-        IRegistryStateSender(_registryStateSender).updateOperators(_operators);
     }
 
     /**
@@ -107,7 +97,6 @@ contract ECDSAStakeRegistry is
     ) external onlyOwner {
         _updateQuorumConfig(_quorum);
         _updateOperators(_operators);
-        IRegistryStateSender(_registryStateSender).updateQuorumConfig(_quorum, _operators);
     }
 
     /// @notice Updates the weight an operator must have to join the operator set
@@ -119,7 +108,6 @@ contract ECDSAStakeRegistry is
     ) external onlyOwner {
         _updateMinimumWeight(_newMinimumWeight);
         _updateOperators(_operators);
-        IRegistryStateSender(_registryStateSender).updateMinimumWeight(_newMinimumWeight, _operators);
     }
 
     /**
@@ -134,7 +122,6 @@ contract ECDSAStakeRegistry is
         uint256 _thresholdWeight
     ) external onlyOwner {
         _updateStakeThreshold(_thresholdWeight);
-        IRegistryStateSender(_registryStateSender).updateStakeThreshold(_thresholdWeight);
     }
 
     /// @notice Verifies if the provided signature data is valid for the given data hash.
@@ -269,7 +256,7 @@ contract ECDSAStakeRegistry is
 
     /// @notice Initializes state for the StakeRegistry
     /// @param _serviceManagerAddr The AVS' ServiceManager contract's address
-    function __ECDSAStakeRegistry_init(
+    function __LightStakeRegistry_init(
         address _serviceManagerAddr,
         uint256 _thresholdWeight,
         Quorum memory _quorum
@@ -284,11 +271,9 @@ contract ECDSAStakeRegistry is
     /// @param operatorsPerQuorum An array of operator address arrays, one for each quorum.
     /// @dev This interface maintains compatibility with avs-sync which handles multiquorums while this registry has a single quorum
     function updateOperatorsForQuorum(
-        address[][] memory operatorsPerQuorum,
-        bytes memory
+        address[][] memory operatorsPerQuorum
     ) external {
         _updateAllOperators(operatorsPerQuorum[0]);
-        IRegistryStateSender(_registryStateSender).updateOperatorsForQuorum(operatorsPerQuorum[0]);
     }
 
     /// @dev Updates the list of operators if the provided list has the correct number of operators.
@@ -366,16 +351,13 @@ contract ECDSAStakeRegistry is
         delete _operatorRegistered[_operator];
         int256 delta = _updateOperatorWeight(_operator);
         _updateTotalWeight(delta);
-        IServiceManager(_serviceManager).deregisterOperatorFromAVS(_operator);
         emit OperatorDeregistered(_operator, address(_serviceManager));
     }
 
-    /// @dev registers an operator through a provided signature
-    /// @param _operatorSignature Contains the operator's signature, salt, and expiry
+    /// @dev registers an operator
     /// @param _signingKey The signing key to add to the operator's history
     function _registerOperatorWithSig(
         address _operator,
-        ISignatureUtils.SignatureWithSaltAndExpiry memory _operatorSignature,
         address _signingKey
     ) internal virtual {
         if (_operatorRegistered[_operator]) {
@@ -386,7 +368,6 @@ contract ECDSAStakeRegistry is
         int256 delta = _updateOperatorWeight(_operator);
         _updateTotalWeight(delta);
         _updateOperatorSigningKey(_operator, _signingKey);
-        IServiceManager(_serviceManager).registerOperatorToAVS(_operator, _operatorSignature);
         emit OperatorRegistered(_operator, _serviceManager);
     }
 

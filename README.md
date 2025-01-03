@@ -16,6 +16,8 @@ Spotted is an AVS (Actively Validated Service) built on EigenLayer that enables 
 - Challenge-based dispute resolution system
 - Bridge protocol integration for state proof verification (challenge)
 
+2. cheap
+3. optimistic
 ## Architecture Overview
 
 ### Core Components

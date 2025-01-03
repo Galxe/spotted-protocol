@@ -30,6 +30,9 @@ abstract contract ECDSAStakeRegistryStorage is ECDSAStakeRegistryEventsAndErrors
     /// @notice Holds the address of the service manager
     address internal _serviceManager;
 
+    /// @notice Holds the address of the registry state sender
+    address internal _registryStateSender;
+
     /// @notice Defines the duration after which the stake's weight expires.
     uint256 internal _stakeExpiry;
 

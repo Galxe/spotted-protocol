@@ -8,9 +8,9 @@ import "../interfaces/IStateManager.sol";
 contract StateManager is IStateManager {
     // constants
     uint256 private constant MAX_BATCH_SIZE = 100; // maximum batch size per transaction
-
-    // current value storage: user -> key -> ValueInfo
-    mapping(address user => mapping(uint256 key => ValueInfo)) private currentValues;
+    
+    // current value storage: user -> key -> value
+    mapping(address user => mapping(uint256 key => uint256 value)) private currentValues;
 
     // history storage grouped by key: user -> key -> history[]
     mapping(address user => mapping(uint256 key => History[])) private histories;
@@ -18,57 +18,35 @@ contract StateManager is IStateManager {
     // keys used by user
     mapping(address user => uint256[]) private userKeys;
 
-    function setValue(uint256 key, uint256 value, StateType stateType) external {
-        ValueInfo storage currentValue = currentValues[msg.sender][key];
-
-        // state validation
-        if (currentValue.exists) {
-            // immutable check
-            if (StateType(currentValue.stateType) == StateType.IMMUTABLE) {
-                revert StateManager__ImmutableStateCannotBeModified();
-            }
-
-            // monotonic check
-            if (
-                StateType(currentValue.stateType) == StateType.MONOTONIC_INCREASING
-                    && value <= currentValue.value
-            ) {
-                revert StateManager__ValueNotMonotonicIncreasing();
-            }
-            if (
-                StateType(currentValue.stateType) == StateType.MONOTONIC_DECREASING
-                    && value >= currentValue.value
-            ) {
-                revert StateManager__ValueNotMonotonicDecreasing();
-            }
-        }
-
+    function setValue(uint256 key, uint256 value) external {
+        // in state manager, 0 is semantically non-existent
+        bool exists = currentValues[msg.sender][key] != 0;
+        
         // record new key
-        if (!currentValue.exists) {
+        if (!exists) {
             userKeys[msg.sender].push(key);
         }
 
-        // update current value
-        currentValue.value = value;
-        currentValue.stateType = uint8(stateType);
-        currentValue.exists = true;
+        // store new value
+        currentValues[msg.sender][key] = value;
 
         // add history record
         History[] storage keyHistory = histories[msg.sender][key];
-        uint256 currentNonce = keyHistory.length;
 
         keyHistory.push(
             History({
                 value: value,
                 blockNumber: uint64(block.number),
-                timestamp: uint32(block.timestamp),
-                nonce: uint32(currentNonce),
-                stateType: uint8(stateType)
+                timestamp: uint48(block.timestamp)
             })
         );
 
         emit HistoryCommitted(
-            msg.sender, key, value, block.timestamp, block.number, currentNonce, stateType
+            msg.sender, 
+            key, 
+            value, 
+            block.timestamp, 
+            block.number
         );
     }
 
@@ -82,51 +60,24 @@ contract StateManager is IStateManager {
 
         for (uint256 i = 0; i < length; ++i) {
             SetValueParams calldata param = params[i];
-            ValueInfo storage currentValue = currentValues[msg.sender][param.key];
-
-            // state validation
-            if (currentValue.exists) {
-                // immutable check
-                if (StateType(currentValue.stateType) == StateType.IMMUTABLE) {
-                    revert StateManager__ImmutableStateCannotBeModified();
-                }
-
-                // monotonic check
-                if (
-                    StateType(currentValue.stateType) == StateType.MONOTONIC_INCREASING
-                        && param.value <= currentValue.value
-                ) {
-                    revert StateManager__ValueNotMonotonicIncreasing();
-                }
-                if (
-                    StateType(currentValue.stateType) == StateType.MONOTONIC_DECREASING
-                        && param.value >= currentValue.value
-                ) {
-                    revert StateManager__ValueNotMonotonicDecreasing();
-                }
-            }
+            uint256 currentValue = currentValues[msg.sender][param.key];
 
             // record new key
-            if (!currentValue.exists) {
+            if (currentValue == 0) {
                 userKeys[msg.sender].push(param.key);
             }
 
-            // update current value
-            currentValue.value = param.value;
-            currentValue.stateType = uint8(param.stateType);
-            currentValue.exists = true;
+            // store new value
+            currentValues[msg.sender][param.key] = param.value;
 
             // add history record
             History[] storage keyHistory = histories[msg.sender][param.key];
-            uint256 currentNonce = keyHistory.length;
 
             keyHistory.push(
                 History({
                     value: param.value,
                     blockNumber: uint64(block.number),
-                    timestamp: uint32(block.timestamp),
-                    nonce: uint32(currentNonce),
-                    stateType: uint8(param.stateType)
+                    timestamp: uint48(block.timestamp)
                 })
             );
 
@@ -135,15 +86,15 @@ contract StateManager is IStateManager {
                 param.key,
                 param.value,
                 block.timestamp,
-                block.number,
-                currentNonce,
-                param.stateType
+                block.number
             );
         }
     }
-    // get current value and state type
 
-    function getCurrentValue(address user, uint256 key) external view returns (ValueInfo memory) {
+    function getCurrentValue(
+        address user,
+        uint256 key
+    ) external view returns (uint256) {
         return currentValues[user][key];
     }
 
@@ -361,7 +312,6 @@ contract StateManager is IStateManager {
         return result;
     }
 
-    // 使用通用二分查找优化的getHistoryAfterTimestamp
     function getHistoryAfterTimestamp(
         address user,
         uint256 key,
@@ -481,126 +431,15 @@ contract StateManager is IStateManager {
         return result;
     }
 
-    // check if the value is greater than input value at a specific block number for monotonic increasing state
-    function checkIncreasingValueAtBlock(
-        address user,
-        uint256 key,
-        uint256 blockNumber,
-        uint256 checkValue
-    ) external view returns (bool) {
-        // check if the state type is correct
-        ValueInfo memory currentValue = currentValues[user][key];
-        if (!currentValue.exists || currentValue.stateType != uint8(StateType.MONOTONIC_INCREASING))
-        {
-            revert StateManager__InvalidStateType();
-        }
-
-        History[] storage keyHistory = histories[user][key];
-        uint256 index = _binarySearch(keyHistory, blockNumber, SearchType.BLOCK_NUMBER);
-        if (index > 0) {
-            index = index - 1;
-        }
-
-        History memory record = keyHistory[index];
-        return record.value > checkValue;
-    }
-
-    // check if the value is less than input value at a specific block number for monotonic decreasing state
-    function checkDecreasingValueAtBlock(
-        address user,
-        uint256 key,
-        uint256 blockNumber,
-        uint256 checkValue
-    ) external view returns (bool) {
-        // check if the state type is correct
-        ValueInfo memory currentValue = currentValues[user][key];
-        if (!currentValue.exists || currentValue.stateType != uint8(StateType.MONOTONIC_DECREASING))
-        {
-            revert StateManager__InvalidStateType();
-        }
-
-        History[] storage keyHistory = histories[user][key];
-        uint256 index = _binarySearch(keyHistory, blockNumber, SearchType.BLOCK_NUMBER);
-        if (index > 0) {
-            index = index - 1;
-        }
-
-        History memory record = keyHistory[index];
-        return record.value < checkValue;
-    }
-
-    // check if the value is greater than input value at a specific timestamp for monotonic increasing state
-    function checkIncreasingValueAtTimestamp(
-        address user,
-        uint256 key,
-        uint256 timestamp,
-        uint256 checkValue
-    ) external view returns (bool) {
-        // check if the state type is correct
-        ValueInfo memory currentValue = currentValues[user][key];
-        if (!currentValue.exists || currentValue.stateType != uint8(StateType.MONOTONIC_INCREASING))
-        {
-            revert StateManager__InvalidStateType();
-        }
-
-        History[] storage keyHistory = histories[user][key];
-        uint256 index = _binarySearch(keyHistory, timestamp, SearchType.TIMESTAMP);
-        if (index > 0) {
-            index = index - 1;
-        }
-
-        History memory record = keyHistory[index];
-        return record.value > checkValue;
-    }
-
-    // check if the value is less than input value at a specific timestamp for monotonic decreasing state
-    function checkDecreasingValueAtTimestamp(
-        address user,
-        uint256 key,
-        uint256 timestamp,
-        uint256 checkValue
-    ) external view returns (bool) {
-        // check if the state type is correct
-        ValueInfo memory currentValue = currentValues[user][key];
-        if (!currentValue.exists || currentValue.stateType != uint8(StateType.MONOTONIC_DECREASING))
-        {
-            revert StateManager__InvalidStateType();
-        }
-
-        History[] storage keyHistory = histories[user][key];
-        uint256 index = _binarySearch(keyHistory, timestamp, SearchType.TIMESTAMP);
-        if (index > 0) {
-            index = index - 1;
-        }
-
-        History memory record = keyHistory[index];
-        return record.value < checkValue;
-    }
-
     // batch get current values of multiple keys
     function getCurrentValues(
         address user,
         uint256[] calldata keys
-    ) external view returns (ValueInfo[] memory values) {
-        values = new ValueInfo[](keys.length);
+    ) external view returns (uint256[] memory values) {
+        values = new uint256[](keys.length);
         for (uint256 i = 0; i < keys.length; i++) {
             values[i] = currentValues[user][keys[i]];
         }
         return values;
-    }
-
-    // check state types of a group of keys
-    function checkKeysStateTypes(
-        address user,
-        uint256[] calldata keys
-    ) external view returns (StateType[] memory) {
-        StateType[] memory types = new StateType[](keys.length);
-
-        for (uint256 i = 0; i < keys.length; i++) {
-            ValueInfo memory info = currentValues[user][keys[i]];
-            types[i] = info.exists ? StateType(info.stateType) : StateType.IMMUTABLE;
-        }
-
-        return types;
     }
 }

@@ -8,6 +8,7 @@
 - Task response verification through ECDSA signatures (much cheaper than BLS)
 - State challenge lifecycle
 - Operator response history query
+- Records of all responses
 
 ## High-level Concepts
 

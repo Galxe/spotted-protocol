@@ -16,40 +16,23 @@ interface IStateManager {
     error StateManager__NoHistoryFound();
     error StateManager__BatchTooLarge();
 
-    // state types
-    enum StateType {
-        IMMUTABLE,
-        MONOTONIC_INCREASING,
-        MONOTONIC_DECREASING
-    }
-
     // search type for binary search
     enum SearchType {
         BLOCK_NUMBER,
         TIMESTAMP
     }
 
-    // value info structure
-    struct ValueInfo {
-        uint256 value; // slot 0: user-defined value
-        uint8 stateType; // slot 1: [0-7] state type
-        bool exists; // slot 1: [8] whether exists
-    }
-
     // history structure
     struct History {
         uint256 value; // slot 0: user-defined value
         uint64 blockNumber; // slot 1: [0-63] block number
-        uint32 timestamp; // slot 1: [64-95] unix timestamp
-        uint32 nonce; // slot 1: [96-127] operation sequence number
-        uint8 stateType; // slot 1: [128-135] state type
+        uint48 timestamp; // slot 1: [64-111] unix timestamp
     }
 
     // parameters for setting value
     struct SetValueParams {
         uint256 key;
         uint256 value;
-        StateType stateType;
     }
 
     // events
@@ -58,19 +41,17 @@ interface IStateManager {
         uint256 indexed key,
         uint256 value,
         uint256 timestamp,
-        uint256 blockNumber,
-        uint256 nonce,
-        StateType stateType
+        uint256 blockNumber
     );
 
     // core functions
-    function setValue(uint256 key, uint256 value, StateType stateType) external;
+    function setValue(uint256 key, uint256 value) external;
     function batchSetValues(
         SetValueParams[] calldata params
     ) external;
 
     // query functions
-    function getCurrentValue(address user, uint256 key) external view returns (ValueInfo memory);
+    function getCurrentValue(address user, uint256 key) external view returns (uint256);
     function getHistoryBetweenBlockNumbers(
         address user,
         uint256 key,
@@ -123,36 +104,8 @@ interface IStateManager {
     function getUsedKeys(
         address user
     ) external view returns (uint256[] memory);
-    function checkIncreasingValueAtBlock(
-        address user,
-        uint256 key,
-        uint256 blockNumber,
-        uint256 checkValue
-    ) external view returns (bool);
-    function checkDecreasingValueAtBlock(
-        address user,
-        uint256 key,
-        uint256 blockNumber,
-        uint256 checkValue
-    ) external view returns (bool);
-    function checkIncreasingValueAtTimestamp(
-        address user,
-        uint256 key,
-        uint256 timestamp,
-        uint256 checkValue
-    ) external view returns (bool);
-    function checkDecreasingValueAtTimestamp(
-        address user,
-        uint256 key,
-        uint256 timestamp,
-        uint256 checkValue
-    ) external view returns (bool);
     function getCurrentValues(
         address user,
         uint256[] calldata keys
-    ) external view returns (ValueInfo[] memory values);
-    function checkKeysStateTypes(
-        address user,
-        uint256[] calldata keys
-    ) external view returns (StateType[] memory);
+    ) external view returns (uint256[] memory values);
 }

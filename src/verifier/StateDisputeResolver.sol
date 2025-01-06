@@ -10,7 +10,8 @@ import "../interfaces/IStrategy.sol";
 import "../interfaces/IMainChainVerifier.sol";
 import "../interfaces/IStateDisputeResolver.sol";
 import "../interfaces/ISpottedServiceManager.sol";
-import {EIP712Upgradeable} from "lib/eigenlayer-middleware/lib/eigenlayer-contracts/lib/openzeppelin-contracts-upgradeable-v4.9.0/contracts/utils/cryptography/EIP712Upgradeable.sol";
+import {EIP712Upgradeable} from
+    "lib/eigenlayer-middleware/lib/eigenlayer-contracts/lib/openzeppelin-contracts-upgradeable-v4.9.0/contracts/utils/cryptography/EIP712Upgradeable.sol";
 
 contract StateDisputeResolver is
     IStateDisputeResolver,
@@ -18,7 +19,6 @@ contract StateDisputeResolver is
     EIP712Upgradeable,
     Ownable
 {
-
     // Constants
     uint256 public constant UNVERIFIED = type(uint256).max;
     uint256 public constant CHALLENGE_WINDOW = 7200; // 24 hours
@@ -40,9 +40,7 @@ contract StateDisputeResolver is
     // Active challenges
     mapping(bytes32 => Challenge) private challenges;
 
-
     // single mainChainVerifier address
-
 
     modifier onlyServiceManager() {
         if (msg.sender != address(serviceManager)) {
@@ -71,11 +69,11 @@ contract StateDisputeResolver is
 
     function initialize(
         address _allocationManager,
-        uint32 _operatorSetId, 
+        uint32 _operatorSetId,
         uint256 _slashAmount
     ) external initializer {
         __EIP712_init("SpottedStateResolver", "v1");
-        
+
         // Initialize contract state
         allocationManager = IAllocationManager(_allocationManager);
         currentOperatorSetId = _operatorSetId;
@@ -132,14 +130,8 @@ contract StateDisputeResolver is
         }
 
         // Generate challenge ID
-        bytes32 challengeId = keccak256(
-            abi.encodePacked(
-                state.user,
-                state.chainId,
-                state.blockNumber,
-                state.key
-            )
-        );
+        bytes32 challengeId =
+            keccak256(abi.encodePacked(state.user, state.chainId, state.blockNumber, state.key));
 
         if (challenges[challengeId].challenger != address(0)) {
             revert StateDisputeResolver__ChallengeAlreadyExists();
@@ -159,7 +151,9 @@ contract StateDisputeResolver is
     }
 
     // everyone can call resolves submitted challenge
-    function resolveChallenge(bytes32 challengeId) external {
+    function resolveChallenge(
+        bytes32 challengeId
+    ) external {
         Challenge storage challenge = challenges[challengeId];
         if (challenge.resolved) {
             revert StateDisputeResolver__ChallengeAlreadyResolved();

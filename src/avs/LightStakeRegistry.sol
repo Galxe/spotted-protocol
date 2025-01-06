@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {ECDSAStakeRegistryStorage, Quorum, StrategyParams} from "./ECDSAStakeRegistryStorage.sol";
+import {LightStakeRegistryStorage, Quorum, StrategyParams} from "./LightStakeRegistryStorage.sol";
 import {IStrategy} from "eigenlayer-contracts/src/contracts/interfaces/IStrategy.sol";
 import {IDelegationManager} from
     "eigenlayer-contracts/src/contracts/interfaces/IDelegationManager.sol";
@@ -9,119 +9,42 @@ import {ISignatureUtils} from "eigenlayer-contracts/src/contracts/interfaces/ISi
 import {IServiceManager} from "../interfaces/IServiceManager.sol";
 
 import {OwnableUpgradeable} from "@openzeppelin-upgrades/contracts/access/OwnableUpgradeable.sol";
-import {CheckpointsUpgradeable} from
-    "@openzeppelin-upgrades/contracts/utils/CheckpointsUpgradeable.sol";
 import {SignatureCheckerUpgradeable} from
     "@openzeppelin-upgrades/contracts/utils/cryptography/SignatureCheckerUpgradeable.sol";
 import {IERC1271Upgradeable} from
     "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
 import {ILightStakeRegistry} from "../interfaces/ILightStakeRegistry.sol";
+import {EpochCheckpointsUpgradeable} from "../libraries/EpochCheckpointsUpgradeable.sol";
+import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
 contract LightStakeRegistry is
     IERC1271Upgradeable,
     OwnableUpgradeable,
-    ECDSAStakeRegistryStorage
+    LightStakeRegistryStorage
 {
     using SignatureCheckerUpgradeable for address;
-    using CheckpointsUpgradeable for CheckpointsUpgradeable.History;
+    using EpochCheckpointsUpgradeable for EpochCheckpointsUpgradeable.History;
 
-    /// @dev Constructor to create ECDSAStakeRegistry.
-    /// @param _delegationManager Address of the DelegationManager contract that this registry interacts with.
     constructor(
-        IDelegationManager _delegationManager
-    ) ECDSAStakeRegistryStorage(_delegationManager) {
+        address _epochManager,
+        address _registryStateReceiver
+    ) LightStakeRegistryStorage(_epochManager, _registryStateReceiver) {
         // _disableInitializers();
     }
 
+    modifier onlyStateReceiver() {
+        require(msg.sender == address(REGISTRY_STATE_RECEIVER), "Invalid sender");
+        _;
+    }
+
     /// @notice Initializes the contract with the given parameters.
-    /// @param _serviceManager The address of the service manager.
     /// @param _thresholdWeight The threshold weight in basis points.
-    /// @param _quorum The quorum struct containing the details of the quorum thresholds.
+    /// @param _initialQuorum The initial quorum struct containing the details of the quorum thresholds.
     function initialize(
-        address _serviceManager,
         uint256 _thresholdWeight,
-        Quorum memory _quorum
+        Quorum memory _initialQuorum
     ) external initializer {
-        __LightStakeRegistry_init(_serviceManager, _thresholdWeight, _quorum);
-    }
-
-    /// @notice Registers a new operator
-    function registerOperator(
-        address _operator,
-        address _signingKey
-    ) external {
-        _registerOperatorWithSig(_operator, _signingKey);
-    }
-
-    /// @notice Deregisters an existing operator
-    function deregisterOperator(address _operator) external {
-        _deregisterOperator(_operator);
-    }
-
-    /**
-     * @notice Updates the signing key for an operator
-     * @dev Only callable by the operator themselves
-     * @param _newSigningKey The new signing key to set for the operator
-     */
-    function updateOperatorSigningKey(
-        address _operator,
-        address _newSigningKey
-    ) external {
-        if (!_operatorRegistered[_operator]) {
-            revert OperatorNotRegistered();
-        }
-        _updateOperatorSigningKey(_operator, _newSigningKey);
-    }
-
-    /**
-     * @notice Updates the StakeRegistry's view of one or more operators' stakes adding a new entry in their history of stake checkpoints,
-     * @dev Queries stakes from the Eigenlayer core DelegationManager contract
-     * @param _operators A list of operator addresses to update
-     */
-    function updateOperators(
-        address[] memory _operators
-    ) external {
-        _updateOperators(_operators);
-    }
-
-    /**
-     * @notice Updates the quorum configuration and the set of operators
-     * @dev Only callable by the contract owner.
-     * It first updates the quorum configuration and then updates the list of operators.
-     * @param _quorum The new quorum configuration, including strategies and their new weights
-     * @param _operators The list of operator addresses to update stakes for
-     */
-    function updateQuorumConfig(
-        Quorum memory _quorum,
-        address[] memory _operators
-    ) external onlyOwner {
-        _updateQuorumConfig(_quorum);
-        _updateOperators(_operators);
-    }
-
-    /// @notice Updates the weight an operator must have to join the operator set
-    /// @dev Access controlled to the contract owner
-    /// @param _newMinimumWeight The new weight an operator must have to join the operator set
-    function updateMinimumWeight(
-        uint256 _newMinimumWeight,
-        address[] memory _operators
-    ) external onlyOwner {
-        _updateMinimumWeight(_newMinimumWeight);
-        _updateOperators(_operators);
-    }
-
-    /**
-     * @notice Sets a new cumulative threshold weight for message validation by operator set signatures.
-     * @dev This function can only be invoked by the owner of the contract. It delegates the update to
-     * an internal function `_updateStakeThreshold`.
-     * @param _thresholdWeight The updated threshold weight required to validate a message. This is the
-     * cumulative weight that must be met or exceeded by the sum of the stakes of the signatories for
-     * a message to be deemed valid.
-     */
-    function updateStakeThreshold(
-        uint256 _thresholdWeight
-    ) external onlyOwner {
-        _updateStakeThreshold(_thresholdWeight);
+        __LightStakeRegistry_init(_thresholdWeight, _initialQuorum);
     }
 
     /// @notice Verifies if the provided signature data is valid for the given data hash.
@@ -132,9 +55,9 @@ contract LightStakeRegistry is
         bytes32 _dataHash,
         bytes memory _signatureData
     ) external view returns (bytes4) {
-        (address[] memory operators, bytes[] memory signatures, uint32 referenceBlock) =
+        (address[] memory operators, bytes[] memory signatures, uint32 referenceEpoch) =
             abi.decode(_signatureData, (address[], bytes[], uint32));
-        _checkSignatures(_dataHash, operators, signatures, referenceBlock);
+        _checkSignatures(_dataHash, operators, signatures, referenceEpoch);
         return IERC1271Upgradeable.isValidSignature.selector;
     }
 
@@ -158,14 +81,14 @@ contract LightStakeRegistry is
     /**
      * @notice Retrieves the latest signing key for a given operator at a specific block number.
      * @param _operator The address of the operator.
-     * @param _blockNumber The block number to get the operator's signing key.
-     * @return The signing key of the operator at the given block.
+     * @param _epochNumber The epoch number to get the operator's signing key.
+     * @return The signing key of the operator at the given epoch.
      */
-    function getOperatorSigningKeyAtBlock(
+    function getOperatorSigningKeyAtEpoch(
         address _operator,
-        uint256 _blockNumber
+        uint32 _epochNumber
     ) external view returns (address) {
-        return address(uint160(_operatorSigningKeyHistory[_operator].getAtBlock(_blockNumber)));
+        return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_epochNumber)));
     }
 
     /// @notice Retrieves the last recorded weight for a given operator.
@@ -189,33 +112,33 @@ contract LightStakeRegistry is
         return _thresholdWeightHistory.latest();
     }
 
-    /// @notice Retrieves the operator's weight at a specific block number.
+    /// @notice Retrieves the operator's weight at a specific epoch number.
     /// @param _operator The address of the operator.
-    /// @param _blockNumber The block number to get the operator weight for the quorum
-    /// @return uint256 - The weight of the operator at the given block.
-    function getOperatorWeightAtBlock(
+    /// @param _epochNumber The epoch number to get the operator weight for the quorum
+    /// @return uint256 - The weight of the operator at the given epoch.
+    function getOperatorWeightAtEpoch(
         address _operator,
-        uint32 _blockNumber
+        uint32 _epochNumber
     ) external view returns (uint256) {
-        return _operatorWeightHistory[_operator].getAtBlock(_blockNumber);
+        return _operatorWeightHistory[_operator].getAtEpoch(_epochNumber);
     }
 
-    /// @notice Retrieves the total weight at a specific block number.
-    /// @param _blockNumber The block number to get the total weight for the quorum
-    /// @return uint256 - The total weight at the given block.
-    function getLastCheckpointTotalWeightAtBlock(
-        uint32 _blockNumber
+    /// @notice Retrieves the total weight at a specific epoch number.
+    /// @param _epochNumber The epoch number to get the total weight for the quorum
+    /// @return uint256 - The total weight at the given epoch.
+    function getTotalWeightAtEpoch(
+        uint32 _epochNumber
     ) external view returns (uint256) {
-        return _totalWeightHistory.getAtBlock(_blockNumber);
+        return _totalWeightHistory.getAtEpoch(_epochNumber);
     }
 
-    /// @notice Retrieves the threshold weight at a specific block number.
-    /// @param _blockNumber The block number to get the threshold weight for the quorum
-    /// @return uint256 - The threshold weight the given block.
-    function getLastCheckpointThresholdWeightAtBlock(
-        uint32 _blockNumber
+    /// @notice Retrieves the threshold weight at a specific epoch number.
+    /// @param _epochNumber The epoch number to get the threshold weight for the quorum
+    /// @return uint256 - The threshold weight the given epoch.
+    function getLastCheckpointThresholdWeightAtEpoch(
+        uint32 _epochNumber
     ) external view returns (uint256) {
-        return _thresholdWeightHistory.getAtBlock(_blockNumber);
+        return _thresholdWeightHistory.getAtEpoch(_epochNumber);
     }
 
     function operatorRegistered(
@@ -229,225 +152,16 @@ contract LightStakeRegistry is
         return _minimumWeight;
     }
 
-    /// @notice Calculates the current weight of an operator based on their delegated stake in the strategies considered in the quorum
-    /// @param _operator The address of the operator.
-    /// @return uint256 - The current weight of the operator; returns 0 if below the threshold.
-    function getOperatorWeight(
-        address _operator
-    ) public view returns (uint256) {
-        StrategyParams[] memory strategyParams = _quorum.strategies;
-        uint256 weight;
-        IStrategy[] memory strategies = new IStrategy[](strategyParams.length);
-        for (uint256 i; i < strategyParams.length; i++) {
-            strategies[i] = strategyParams[i].strategy;
-        }
-        uint256[] memory shares = DELEGATION_MANAGER.getOperatorShares(_operator, strategies);
-        for (uint256 i; i < strategyParams.length; i++) {
-            weight += shares[i] * strategyParams[i].multiplier;
-        }
-        weight = weight / BPS;
-
-        if (weight >= _minimumWeight) {
-            return weight;
-        } else {
-            return 0;
-        }
-    }
-
     /// @notice Initializes state for the StakeRegistry
-    /// @param _serviceManagerAddr The AVS' ServiceManager contract's address
+    /// @param _thresholdWeight The threshold weight in basis points.
+    /// @param _initialQuorum The initial quorum struct containing the details of the quorum thresholds.
     function __LightStakeRegistry_init(
-        address _serviceManagerAddr,
         uint256 _thresholdWeight,
-        Quorum memory _quorum
+        Quorum memory _initialQuorum
     ) internal onlyInitializing {
-        _serviceManager = _serviceManagerAddr;
         _updateStakeThreshold(_thresholdWeight);
-        _updateQuorumConfig(_quorum);
+        _updateQuorumConfig(_initialQuorum);
         __Ownable_init();
-    }
-
-    /// @notice Updates the set of operators for the first quorum.
-    /// @param operatorsPerQuorum An array of operator address arrays, one for each quorum.
-    /// @dev This interface maintains compatibility with avs-sync which handles multiquorums while this registry has a single quorum
-    function updateOperatorsForQuorum(
-        address[][] memory operatorsPerQuorum
-    ) external {
-        _updateAllOperators(operatorsPerQuorum[0]);
-    }
-
-    /// @dev Updates the list of operators if the provided list has the correct number of operators.
-    /// Reverts if the provided list of operators does not match the expected total count of operators.
-    /// @param _operators The list of operator addresses to update.
-    function _updateAllOperators(
-        address[] memory _operators
-    ) internal {
-        if (_operators.length != _totalOperators) {
-            revert MustUpdateAllOperators();
-        }
-        _updateOperators(_operators);
-    }
-
-    /// @dev Updates the weights for a given list of operator addresses.
-    /// When passing an operator that isn't registered, then 0 is added to their history
-    /// @param _operators An array of addresses for which to update the weights.
-    function _updateOperators(
-        address[] memory _operators
-    ) internal {
-        int256 delta;
-        for (uint256 i; i < _operators.length; i++) {
-            delta += _updateOperatorWeight(_operators[i]);
-        }
-        _updateTotalWeight(delta);
-    }
-
-    /// @dev Updates the stake threshold weight and records the history.
-    /// @param _thresholdWeight The new threshold weight to set and record in the history.
-    function _updateStakeThreshold(
-        uint256 _thresholdWeight
-    ) internal {
-        _thresholdWeightHistory.push(_thresholdWeight);
-        emit ThresholdWeightUpdated(_thresholdWeight);
-    }
-
-    /// @dev Updates the weight an operator must have to join the operator set
-    /// @param _newMinimumWeight The new weight an operator must have to join the operator set
-    function _updateMinimumWeight(
-        uint256 _newMinimumWeight
-    ) internal {
-        uint256 oldMinimumWeight = _minimumWeight;
-        _minimumWeight = _newMinimumWeight;
-        emit MinimumWeightUpdated(oldMinimumWeight, _newMinimumWeight);
-    }
-
-    /// @notice Updates the quorum configuration
-    /// @dev Replaces the current quorum configuration with `_newQuorum` if valid.
-    /// Reverts with `InvalidQuorum` if the new quorum configuration is not valid.
-    /// Emits `QuorumUpdated` event with the old and new quorum configurations.
-    /// @param _newQuorum The new quorum configuration to set.
-    function _updateQuorumConfig(
-        Quorum memory _newQuorum
-    ) internal {
-        if (!_isValidQuorum(_newQuorum)) {
-            revert InvalidQuorum();
-        }
-        Quorum memory oldQuorum = _quorum;
-        delete _quorum;
-        for (uint256 i; i < _newQuorum.strategies.length; i++) {
-            _quorum.strategies.push(_newQuorum.strategies[i]);
-        }
-        emit QuorumUpdated(oldQuorum, _newQuorum);
-    }
-
-    /// @dev Internal function to deregister an operator
-    /// @param _operator The operator's address to deregister
-    function _deregisterOperator(
-        address _operator
-    ) internal {
-        if (!_operatorRegistered[_operator]) {
-            revert OperatorNotRegistered();
-        }
-        _totalOperators--;
-        delete _operatorRegistered[_operator];
-        int256 delta = _updateOperatorWeight(_operator);
-        _updateTotalWeight(delta);
-        emit OperatorDeregistered(_operator, address(_serviceManager));
-    }
-
-    /// @dev registers an operator
-    /// @param _signingKey The signing key to add to the operator's history
-    function _registerOperatorWithSig(
-        address _operator,
-        address _signingKey
-    ) internal virtual {
-        if (_operatorRegistered[_operator]) {
-            revert OperatorAlreadyRegistered();
-        }
-        _totalOperators++;
-        _operatorRegistered[_operator] = true;
-        int256 delta = _updateOperatorWeight(_operator);
-        _updateTotalWeight(delta);
-        _updateOperatorSigningKey(_operator, _signingKey);
-        emit OperatorRegistered(_operator, _serviceManager);
-    }
-
-    /// @dev Internal function to update an operator's signing key
-    /// @param _operator The address of the operator to update the signing key for
-    /// @param _newSigningKey The new signing key to set for the operator
-    function _updateOperatorSigningKey(address _operator, address _newSigningKey) internal {
-        address oldSigningKey = address(uint160(_operatorSigningKeyHistory[_operator].latest()));
-        if (_newSigningKey == oldSigningKey) {
-            return;
-        }
-        _operatorSigningKeyHistory[_operator].push(uint160(_newSigningKey));
-        emit SigningKeyUpdate(_operator, block.number, _newSigningKey, oldSigningKey);
-    }
-
-    /// @notice Updates the weight of an operator and returns the previous and current weights.
-    /// @param _operator The address of the operator to update the weight of.
-    function _updateOperatorWeight(
-        address _operator
-    ) internal virtual returns (int256) {
-        int256 delta;
-        uint256 newWeight;
-        uint256 oldWeight = _operatorWeightHistory[_operator].latest();
-        if (!_operatorRegistered[_operator]) {
-            delta -= int256(oldWeight);
-            if (delta == 0) {
-                return delta;
-            }
-            _operatorWeightHistory[_operator].push(0);
-        } else {
-            newWeight = getOperatorWeight(_operator);
-            delta = int256(newWeight) - int256(oldWeight);
-            if (delta == 0) {
-                return delta;
-            }
-            _operatorWeightHistory[_operator].push(newWeight);
-        }
-        emit OperatorWeightUpdated(_operator, oldWeight, newWeight);
-        return delta;
-    }
-
-    /// @dev Internal function to update the total weight of the stake
-    /// @param delta The change in stake applied last total weight
-    /// @return oldTotalWeight The weight before the update
-    /// @return newTotalWeight The updated weight after applying the delta
-    function _updateTotalWeight(
-        int256 delta
-    ) internal returns (uint256 oldTotalWeight, uint256 newTotalWeight) {
-        oldTotalWeight = _totalWeightHistory.latest();
-        int256 newWeight = int256(oldTotalWeight) + delta;
-        newTotalWeight = uint256(newWeight);
-        _totalWeightHistory.push(newTotalWeight);
-        emit TotalWeightUpdated(oldTotalWeight, newTotalWeight);
-    }
-
-    /**
-     * @dev Verifies that a specified quorum configuration is valid. A valid quorum has:
-     *      1. Weights that sum to exactly 10,000 basis points, ensuring proportional representation.
-     *      2. Unique strategies without duplicates to maintain quorum integrity.
-     * @param _quorum The quorum configuration to be validated.
-     * @return bool True if the quorum configuration is valid, otherwise false.
-     */
-    function _isValidQuorum(
-        Quorum memory _quorum
-    ) internal pure returns (bool) {
-        StrategyParams[] memory strategies = _quorum.strategies;
-        address lastStrategy;
-        address currentStrategy;
-        uint256 totalMultiplier;
-        for (uint256 i; i < strategies.length; i++) {
-            currentStrategy = address(strategies[i].strategy);
-            if (lastStrategy >= currentStrategy) revert NotSorted();
-            lastStrategy = currentStrategy;
-            totalMultiplier += strategies[i].multiplier;
-        }
-        if (totalMultiplier != BPS) {
-            return false;
-        } else {
-            return true;
-        }
     }
 
     /**
@@ -455,13 +169,13 @@ contract LightStakeRegistry is
      * @param _dataHash The hash of the data the signers endorsed.
      * @param _operators A collection of addresses that endorsed the data hash.
      * @param _signatures A collection of signatures matching the signers.
-     * @param _referenceBlock The block number for evaluating stake weight; use max uint32 for latest weight.
+     * @param _referenceEpoch The epoch number for evaluating stake weight; use max uint32 for latest weight.
      */
     function _checkSignatures(
         bytes32 _dataHash,
         address[] memory _operators,
         bytes[] memory _signatures,
-        uint32 _referenceBlock
+        uint32 _referenceEpoch
     ) internal view {
         uint256 signersLength = _operators.length;
         address currentOperator;
@@ -470,19 +184,20 @@ contract LightStakeRegistry is
         uint256 signedWeight;
 
         _validateSignaturesLength(signersLength, _signatures.length);
+
         for (uint256 i; i < signersLength; i++) {
             currentOperator = _operators[i];
-            signer = _getOperatorSigningKey(currentOperator, _referenceBlock);
+            signer = _getOperatorSigningKey(currentOperator, _referenceEpoch);
 
             _validateSortedSigners(lastOperator, currentOperator);
             _validateSignature(signer, _dataHash, _signatures[i]);
 
             lastOperator = currentOperator;
-            uint256 operatorWeight = _getOperatorWeight(currentOperator, _referenceBlock);
+            uint256 operatorWeight = _getOperatorWeight(currentOperator, _referenceEpoch);
             signedWeight += operatorWeight;
         }
 
-        _validateThresholdStake(signedWeight, _referenceBlock);
+        _validateThresholdStake(signedWeight, _referenceEpoch);
     }
 
     /// @notice Validates that the number of signers equals the number of signatures, and neither is zero.
@@ -523,71 +238,262 @@ contract LightStakeRegistry is
         }
     }
 
+    function _updateStakeThreshold(
+        uint256 _thresholdWeight
+    ) internal {
+        _thresholdWeightHistory.push(_thresholdWeight);
+        emit ThresholdWeightUpdated(_thresholdWeight);
+    }
+
+    /// @notice Updates the quorum configuration
+    /// @dev Replaces the current quorum configuration with `_newQuorum` if valid.
+    /// Reverts with `InvalidQuorum` if the new quorum configuration is not valid.
+    /// Emits `QuorumUpdated` event with the old and new quorum configurations.
+    /// @param _newQuorum The new quorum configuration to set.
+    function _updateQuorumConfig(
+        Quorum memory _newQuorum
+    ) internal {
+        // 获取当前的quorum配置作为oldQuorum
+        Quorum memory oldQuorum = Quorum({strategies: _quorum.strategies});
+
+        // 清除当前quorum配置
+        delete _quorum.strategies;
+
+        // 设置新的quorum配置
+        for (uint256 i; i < _newQuorum.strategies.length; i++) {
+            _quorum.strategies.push(_newQuorum.strategies[i]);
+        }
+
+        emit QuorumUpdated(oldQuorum, _newQuorum);
+    }
+
     /// @notice Retrieves the operator weight for a signer, either at the last checkpoint or a specified block.
     /// @param _operator The operator to query their signing key history for
-    /// @param _referenceBlock The block number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
+    /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
     /// @return The weight of the operator.
     function _getOperatorSigningKey(
         address _operator,
-        uint32 _referenceBlock
+        uint32 _referenceEpoch
     ) internal view returns (address) {
-        if (_referenceBlock >= block.number) {
-            revert InvalidReferenceBlock();
-        }
-        return address(uint160(_operatorSigningKeyHistory[_operator].getAtBlock(_referenceBlock)));
+        return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_referenceEpoch)));
     }
 
     /// @notice Retrieves the operator weight for a signer, either at the last checkpoint or a specified block.
-    /// @param _signer The address of the signer whose weight is returned.
-    /// @param _referenceBlock The block number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
+    /// @param _operator The operator to query their signing key history for
+    /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
     /// @return The weight of the operator.
     function _getOperatorWeight(
-        address _signer,
-        uint32 _referenceBlock
+        address _operator,
+        uint32 _referenceEpoch
     ) internal view returns (uint256) {
-        if (_referenceBlock >= block.number) {
-            revert InvalidReferenceBlock();
-        }
-        return _operatorWeightHistory[_signer].getAtBlock(_referenceBlock);
+        return _operatorWeightHistory[_operator].getAtEpoch(_referenceEpoch);
     }
 
-    /// @notice Retrieve the total stake weight at a specific block or the latest if not specified.
-    /// @dev If the `_referenceBlock` is the maximum value for uint32, the latest total weight is returned.
-    /// @param _referenceBlock The block number to retrieve the total stake weight from.
-    /// @return The total stake weight at the given block or the latest if the given block is the max uint32 value.
+    /// @notice Retrieve the total stake weight at a specific epoch or the latest if not specified.
+    /// @param _referenceEpoch The epoch number to retrieve the total stake weight from.
+    /// @return The total stake weight at the given epoch or the latest if the given epoch is the max uint32 value.
     function _getTotalWeight(
-        uint32 _referenceBlock
+        uint32 _referenceEpoch
     ) internal view returns (uint256) {
-        if (_referenceBlock >= block.number) {
-            revert InvalidReferenceBlock();
-        }
-        return _totalWeightHistory.getAtBlock(_referenceBlock);
+        return _totalWeightHistory.getAtEpoch(_referenceEpoch);
     }
 
     /// @notice Retrieves the threshold stake for a given reference block.
-    /// @param _referenceBlock The block number to query the threshold stake for.
+    /// @param _referenceEpoch The epoch number to query the threshold stake for.
     /// If set to the maximum uint32 value, it retrieves the latest threshold stake.
     /// @return The threshold stake in basis points for the reference block.
     function _getThresholdStake(
-        uint32 _referenceBlock
+        uint32 _referenceEpoch
     ) internal view returns (uint256) {
-        if (_referenceBlock >= block.number) {
-            revert InvalidReferenceBlock();
-        }
-        return _thresholdWeightHistory.getAtBlock(_referenceBlock);
+        return _thresholdWeightHistory.getAtEpoch(_referenceEpoch);
     }
 
     /// @notice Validates that the cumulative stake of signed messages meets or exceeds the required threshold.
     /// @param _signedWeight The cumulative weight of the signers that have signed the message.
-    /// @param _referenceBlock The block number to verify the stake threshold for
-    function _validateThresholdStake(uint256 _signedWeight, uint32 _referenceBlock) internal view {
-        uint256 totalWeight = _getTotalWeight(_referenceBlock);
+    /// @param _referenceEpoch The epoch number to verify the stake threshold for
+    function _validateThresholdStake(uint256 _signedWeight, uint32 _referenceEpoch) internal view {
+        uint256 totalWeight = _getTotalWeight(_referenceEpoch);
         if (_signedWeight > totalWeight) {
             revert InvalidSignedWeight();
         }
-        uint256 thresholdStake = _getThresholdStake(_referenceBlock);
+        uint256 thresholdStake = _getThresholdStake(_referenceEpoch);
         if (thresholdStake > _signedWeight) {
             revert InsufficientSignedStake();
         }
+    }
+
+    function processEpochUpdate(
+        uint256 epoch,
+        IEpochManager.StateUpdate[] memory updates
+    ) external onlyStateReceiver {
+        require(epoch >= EPOCH_MANAGER.currentEpoch() + 1, "Invalid epoch");
+
+        // 处理每个update
+        for (uint256 i = 0; i < updates.length; i++) {
+            IEpochManager.StateUpdate memory update = updates[i];
+
+            // 根据消息类型调用对应的处理函数
+            if (update.updateType == IEpochManager.MessageType.REGISTER) {
+                _handleRegister(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.DEREGISTER) {
+                _handleDeregister(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_SIGNING_KEY) {
+                _handleUpdateSigningKey(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS) {
+                _handleUpdateOperators(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_QUORUM) {
+                _handleUpdateQuorum(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_MIN_WEIGHT) {
+                _handleUpdateMinWeight(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_THRESHOLD) {
+                _handleUpdateThreshold(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS_FOR_QUORUM) {
+                _handleUpdateOperatorsForQuorum(update.data);
+            } else {
+                revert("Invalid message type");
+            }
+        }
+    }
+
+    // 处理注册操作
+    function _handleRegister(
+        bytes memory data
+    ) internal {
+        (address operator, address signingKey, uint256 newWeight, uint256 newTotalWeight) =
+            abi.decode(data, (address, address, uint256, uint256));
+
+        _totalOperators += 1;
+        _operatorRegistered[operator] = true;
+        _operatorSigningKeyHistory[operator].push(uint160(signingKey));
+        _operatorWeightHistory[operator].push(newWeight);
+        _totalWeightHistory.push(newTotalWeight);
+
+        emit OperatorRegistered(operator);
+    }
+
+    function _handleDeregister(
+        bytes memory data
+    ) internal {
+        (address operator, uint256 newWeight, uint256 newTotalWeight) =
+            abi.decode(data, (address, uint256, uint256));
+
+        _totalOperators -= 1;
+        delete _operatorRegistered[operator];
+
+        // 更新operator的weight和total weight
+        _operatorWeightHistory[operator].push(newWeight);
+        _totalWeightHistory.push(newTotalWeight);
+
+        emit OperatorDeregistered(operator);
+    }
+
+    function _handleUpdateSigningKey(
+        bytes memory data
+    ) internal {
+        (address operator, address newSigningKey) = abi.decode(data, (address, address));
+
+        address oldSigningKey = address(uint160(_operatorSigningKeyHistory[operator].latest()));
+        if (newSigningKey == oldSigningKey) {
+            return;
+        }
+        _operatorSigningKeyHistory[operator].push(uint160(newSigningKey));
+
+        emit SigningKeyUpdate(operator, newSigningKey, oldSigningKey);
+    }
+
+    function _handleUpdateOperators(
+        bytes memory data
+    ) internal {
+        (address[] memory operators, uint256[] memory newWeights, uint256 newTotalWeight) =
+            abi.decode(data, (address[], uint256[], uint256));
+        uint256 operatorsLength = operators.length;
+        // update each operator's weight
+        for (uint256 i = 0; i < operatorsLength;) {
+            _operatorWeightHistory[operators[i]].push(newWeights[i]);
+            unchecked {
+                ++i;
+            }
+        }
+
+        // update total weight
+        _totalWeightHistory.push(newTotalWeight);
+    }
+
+    function _handleUpdateQuorum(
+        bytes memory data
+    ) internal {
+        (
+            Quorum memory newQuorumConfig,
+            address[] memory operators,
+            uint256[] memory newWeights,
+            uint256 newTotalWeight
+        ) = abi.decode(data, (Quorum, address[], uint256[], uint256));
+
+        // update quorum config using storage variable directly
+        _updateQuorumConfig(newQuorumConfig);
+
+        // update operators' weight
+        for (uint256 i = 0; i < operators.length; i++) {
+            _operatorWeightHistory[operators[i]].push(newWeights[i]);
+        }
+
+        // update total weight
+        _totalWeightHistory.push(newTotalWeight);
+    }
+
+    function _handleUpdateMinWeight(
+        bytes memory data
+    ) internal {
+        (
+            uint256 newMinimumWeight,
+            address[] memory operators,
+            uint256[] memory newWeights,
+            uint256 newTotalWeight
+        ) = abi.decode(data, (uint256, address[], uint256[], uint256));
+
+        // update minimum weight
+        _minimumWeight = newMinimumWeight;
+
+        // update operators' weight
+        for (uint256 i = 0; i < operators.length; i++) {
+            _operatorWeightHistory[operators[i]].push(newWeights[i]);
+        }
+
+        // update total weight
+        _totalWeightHistory.push(newTotalWeight);
+    }
+
+    function _handleUpdateThreshold(
+        bytes memory data
+    ) internal {
+        uint256 thresholdWeight = abi.decode(data, (uint256));
+
+        // update threshold weight
+        _thresholdWeightHistory.push(thresholdWeight);
+    }
+
+    function getThresholdWeightAtEpoch(
+        uint32 _epoch
+    ) external view returns (uint256) {
+        return _thresholdWeightHistory.getAtEpoch(_epoch);
+    }
+
+    function _handleUpdateOperatorsForQuorum(
+        bytes memory data
+    ) internal {
+        (address[] memory operators, uint256[] memory newWeights, uint256 newTotalWeight) =
+            abi.decode(data, (address[], uint256[], uint256));
+
+        uint256 operatorsLength = operators.length;
+        for (uint256 i = 0; i < operatorsLength;) {
+            _operatorWeightHistory[operators[i]].push(newWeights[i]);
+            unchecked {
+                ++i;
+            }
+        }
+
+        _totalWeightHistory.push(newTotalWeight);
+
+        emit OperatorsUpdated(operators, newWeights, newTotalWeight);
     }
 }

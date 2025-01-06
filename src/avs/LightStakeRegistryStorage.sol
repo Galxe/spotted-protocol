@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IDelegationManager} from
-    "eigenlayer-contracts/src/contracts/interfaces/IDelegationManager.sol";
 import {EpochCheckpointsUpgradeable} from "../libraries/EpochCheckpointsUpgradeable.sol";
 import {
-    ECDSAStakeRegistryEventsAndErrors,
+    LightStakeRegistryEventsAndErrors,
     Quorum,
     StrategyParams
-} from "../interfaces/IECDSAStakeRegistryEventsAndErrors.sol";
+} from "../interfaces/ILightStakeRegistryEventsAndErrors.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
-import {IServiceManager} from "../interfaces/IServiceManager.sol";
+import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
 
-abstract contract ECDSAStakeRegistryStorage is ECDSAStakeRegistryEventsAndErrors {
-    /// @notice Manages staking delegations through the DelegationManager interface
-    IDelegationManager internal immutable DELEGATION_MANAGER;
+abstract contract LightStakeRegistryStorage is LightStakeRegistryEventsAndErrors {
     IEpochManager internal immutable EPOCH_MANAGER;
-    IServiceManager internal immutable SERVICE_MANAGER;
-
+    IRegistryStateReceiver internal immutable REGISTRY_STATE_RECEIVER;
     /// @dev The total amount of multipliers to weigh stakes
     uint256 internal constant BPS = 10_000;
 
@@ -48,15 +43,13 @@ abstract contract ECDSAStakeRegistryStorage is ECDSAStakeRegistryEventsAndErrors
     /// @notice Maps an operator to their registration status
     mapping(address => bool) internal _operatorRegistered;
 
-    /// @param _delegationManager Connects this registry with the DelegationManager
-    constructor(address _delegationManager, address _epochManager, address _serviceManager) {
-        DELEGATION_MANAGER = IDelegationManager(_delegationManager);
-        EPOCH_MANAGER = IEpochManager(_epochManager);
-        SERVICE_MANAGER = IServiceManager(_serviceManager);
-    }
-
     // slither-disable-next-line shadowing-state
     /// @dev Reserves storage slots for future upgrades
     // solhint-disable-next-line
     uint256[40] private __gap;
+
+    constructor(address _epochManager, address _registryStateReceiver) {
+        EPOCH_MANAGER = IEpochManager(_epochManager);
+        REGISTRY_STATE_RECEIVER = IRegistryStateReceiver(_registryStateReceiver);
+    }
 }

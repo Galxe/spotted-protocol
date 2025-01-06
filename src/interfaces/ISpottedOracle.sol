@@ -4,24 +4,24 @@ pragma solidity ^0.8.26;
 interface ISpottedOracle {
     // Structs
     struct StateRequest {
-        address requester;      // Who initiated the request
-        address targetUser;     // User whose state we want to query
-        uint256 key;           // State key
-        uint256 blockNumber;   // Target block number
-        uint256 timestamp;     // When the request was made
-        uint256 deadlineTime;  // When the request expires
-        bytes32 chainId;       // Target chain ID
-        bool fulfilled;        // Whether the request has been fulfilled
-        uint256 nonce;        // Request nonce for uniqueness
+        address requester; // Who initiated the request
+        address targetUser; // User whose state we want to query
+        uint256 key; // State key
+        uint256 blockNumber; // Target block number
+        uint256 timestamp; // When the request was made
+        uint256 deadlineTime; // When the request expires
+        bytes32 chainId; // Target chain ID
+        bool fulfilled; // Whether the request has been fulfilled
+        uint256 nonce; // Request nonce for uniqueness
     }
 
     struct StateResponse {
-        uint256 value;         // The state value
-        uint64 blockNumber;    // Block number when the state was recorded
-        uint32 timestamp;      // Timestamp when the state was recorded
-        uint32 nonce;         // Response nonce
-        uint8 stateType;      // Type of state value
-        bytes[] signatures;    // Operator signatures
+        uint256 value; // The state value
+        uint64 blockNumber; // Block number when the state was recorded
+        uint32 timestamp; // Timestamp when the state was recorded
+        uint32 nonce; // Response nonce
+        uint8 stateType; // Type of state value
+        bytes[] signatures; // Operator signatures
     }
 
     event StateRequestCreated(
@@ -62,9 +62,13 @@ interface ISpottedOracle {
         bytes memory signatureData
     ) external;
 
-    function getRequest(bytes32 requestId) external view returns (StateRequest memory);
+    function getRequest(
+        bytes32 requestId
+    ) external view returns (StateRequest memory);
 
-    function getResponse(bytes32 requestId) external view returns (StateResponse memory);
+    function getResponse(
+        bytes32 requestId
+    ) external view returns (StateResponse memory);
 
     function stakeRegistry() external view returns (address);
-} 
+}

@@ -12,7 +12,7 @@ struct Quorum {
     StrategyParams[] strategies; // An array of strategy parameters to define the quorum
 }
 
-interface ECDSAStakeRegistryEventsAndErrors {
+interface LightStakeRegistryEventsAndErrors {
     enum MessageType {
         REGISTER,
         DEREGISTER,
@@ -27,15 +27,11 @@ interface ECDSAStakeRegistryEventsAndErrors {
         UPDATE_OPERATOR_WEIGHT
     }
 
-    /// @notice Emitted when the system registers an operator
-    /// @param _operator The address of the registered operator
-    /// @param _avs The address of the associated AVS
-    event OperatorRegistered(address indexed _operator, address indexed _avs);
+    event OperatorRegistered(address indexed _operator);
 
     /// @notice Emitted when the system deregisters an operator
     /// @param _operator The address of the deregistered operator
-    /// @param _avs The address of the associated AVS
-    event OperatorDeregistered(address indexed _operator, address indexed _avs);
+    event OperatorDeregistered(address indexed _operator);
 
     /// @notice Emitted when the system updates the quorum
     /// @param _old The previous quorum configuration
@@ -65,6 +61,12 @@ interface ECDSAStakeRegistryEventsAndErrors {
 
     /// @notice Emits when setting a new threshold weight.
     event ThresholdWeightUpdated(uint256 _thresholdWeight);
+
+    /// @notice Emitted when the system updates the operators
+    /// @param operators The addresses of the operators updated
+    /// @param newWeights The new weights of the operators
+    /// @param newTotalWeight The new total weight
+    event OperatorsUpdated(address[] operators, uint256[] newWeights, uint256 newTotalWeight);
 
     /// @notice Emitted when an operator's signing key is updated
     /// @param operator The address of the operator whose signing key was updated

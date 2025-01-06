@@ -32,5 +32,4 @@ interface ISpottedServiceManager {
         uint256 value,
         uint256 timestamp
     ) external pure returns (bytes32);
-
 }

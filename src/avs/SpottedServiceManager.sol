@@ -27,7 +27,6 @@ contract SpottedServiceManager is
     // State variables
     IStateDisputeResolver public immutable disputeResolver;
 
-
     modifier onlyDisputeResolver() {
         if (msg.sender != address(disputeResolver)) {
             revert SpottedServiceManager__CallerNotDisputeResolver();
@@ -57,21 +56,21 @@ contract SpottedServiceManager is
         __Pausable_init();
         __ServiceManagerBase_init(initialOwner, address(pauserRegistry));
         _setRewardsInitiator(initialRewardsInitiator);
-
     }
 
     function registerOperatorToAVS(
         address operator,
         ISignatureUtils.SignatureWithSaltAndExpiry memory operatorSignature
-    ) external override (ECDSAServiceManagerBase, ISpottedServiceManager) onlyStakeRegistry {
+    ) external override(ECDSAServiceManagerBase, ISpottedServiceManager) onlyStakeRegistry {
         _registerOperatorToAVS(operator, operatorSignature);
     }
+
     function deregisterOperatorFromAVS(
         address operator
-    ) external override (ECDSAServiceManagerBase, ISpottedServiceManager) onlyStakeRegistry {
+    ) external override(ECDSAServiceManagerBase, ISpottedServiceManager) onlyStakeRegistry {
         _deregisterOperatorFromAVS(operator);
     }
-    
+
     function generateTaskId(
         address user,
         uint32 chainId,
@@ -80,14 +79,6 @@ contract SpottedServiceManager is
         uint256 value,
         uint256 timestamp
     ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(
-            user,
-            chainId,
-            blockNumber,
-            timestamp,
-            key,
-            value
-        ));
+        return keccak256(abi.encodePacked(user, chainId, blockNumber, timestamp, key, value));
     }
-
 }

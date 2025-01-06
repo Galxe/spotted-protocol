@@ -8,7 +8,7 @@ import "../interfaces/IStateManager.sol";
 contract StateManager is IStateManager {
     // constants
     uint256 private constant MAX_BATCH_SIZE = 100; // maximum batch size per transaction
-    
+
     // current value storage: user -> key -> value
     mapping(address user => mapping(uint256 key => uint256 value)) private currentValues;
 
@@ -21,7 +21,7 @@ contract StateManager is IStateManager {
     function setValue(uint256 key, uint256 value) external {
         // in state manager, 0 is semantically non-existent
         bool exists = currentValues[msg.sender][key] != 0;
-        
+
         // record new key
         if (!exists) {
             userKeys[msg.sender].push(key);
@@ -41,13 +41,7 @@ contract StateManager is IStateManager {
             })
         );
 
-        emit HistoryCommitted(
-            msg.sender, 
-            key, 
-            value, 
-            block.timestamp, 
-            block.number
-        );
+        emit HistoryCommitted(msg.sender, key, value, block.timestamp, block.number);
     }
 
     function batchSetValues(
@@ -81,20 +75,11 @@ contract StateManager is IStateManager {
                 })
             );
 
-            emit HistoryCommitted(
-                msg.sender,
-                param.key,
-                param.value,
-                block.timestamp,
-                block.number
-            );
+            emit HistoryCommitted(msg.sender, param.key, param.value, block.timestamp, block.number);
         }
     }
 
-    function getCurrentValue(
-        address user,
-        uint256 key
-    ) external view returns (uint256) {
+    function getCurrentValue(address user, uint256 key) external view returns (uint256) {
         return currentValues[user][key];
     }
 

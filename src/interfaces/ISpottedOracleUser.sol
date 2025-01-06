@@ -11,4 +11,4 @@ interface ISpottedOracleUser {
         uint32 nonce,
         uint8 stateType
     ) external;
-} 
+}

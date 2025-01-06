@@ -54,7 +54,7 @@ interface IStateDisputeResolver {
     // Core functions
     function initialize(
         address _allocationManager,
-        uint32 _operatorSetId, 
+        uint32 _operatorSetId,
         uint256 _slashAmount
     ) external;
 
@@ -64,17 +64,33 @@ interface IStateDisputeResolver {
         bytes[] calldata signatures
     ) external payable;
 
-    function resolveChallenge(bytes32 challengeId) external;
+    function resolveChallenge(
+        bytes32 challengeId
+    ) external;
 
     // Admin functions
-    function setOperatorSetId(uint32 newSetId) external;
-    function setSlashableStrategies(IStrategy[] calldata strategies) external;
-    function setSlashAmount(uint256 newAmount) external;
-    function setServiceManager(address _serviceManager) external;
-    function setMainChainVerifier(address _verifier) external;
+    function setOperatorSetId(
+        uint32 newSetId
+    ) external;
+    function setSlashableStrategies(
+        IStrategy[] calldata strategies
+    ) external;
+    function setSlashAmount(
+        uint256 newAmount
+    ) external;
+    function setServiceManager(
+        address _serviceManager
+    ) external;
+    function setMainChainVerifier(
+        address _verifier
+    ) external;
 
     // View functions
-    function getChallenge(bytes32 challengeId) external view returns (Challenge memory);
+    function getChallenge(
+        bytes32 challengeId
+    ) external view returns (Challenge memory);
     function currentOperatorSetId() external view returns (uint32);
-    function slashableStrategies(uint256 index) external view returns (IStrategy);
+    function slashableStrategies(
+        uint256 index
+    ) external view returns (IStrategy);
 }

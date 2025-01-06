@@ -7,6 +7,20 @@ import {
 } from "../avs/ECDSAStakeRegistryStorage.sol";
 
 interface IECDSAStakeRegistry {
+    enum MessageType {
+        REGISTER,
+        DEREGISTER,
+        UPDATE_SIGNING_KEY,
+        UPDATE_OPERATORS,
+        UPDATE_QUORUM,
+        UPDATE_MIN_WEIGHT,
+        UPDATE_THRESHOLD,
+        UPDATE_OPERATORS_QUORUM,
+        BATCH_UPDATE,
+        REGISTER_WITH_WEIGHT,
+        UPDATE_OPERATOR_WEIGHT
+    }
+
     /**
      * @notice Emitted when an operator is registered
      * @param operator The address of the registered operator

@@ -2,9 +2,8 @@
 pragma solidity ^0.8.12;
 
 import {ISignatureUtils} from "eigenlayer-contracts/src/contracts/interfaces/ISignatureUtils.sol";
-import {
-    ECDSAStakeRegistryStorage, Quorum, StrategyParams
-} from "../avs/ECDSAStakeRegistryStorage.sol";
+import {Quorum, StrategyParams} from "../interfaces/IECDSAStakeRegistryEventsAndErrors.sol";
+import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
 interface ILightStakeRegistry {
     /**
@@ -24,41 +23,13 @@ interface ILightStakeRegistry {
     /**
      * @notice Emitted when an operator's signing key is updated
      * @param operator The address of the operator
-     * @param blockNumber The block number when the update occurred
+     * @param epochNumber The epoch number when the update occurred
      * @param newSigningKey The new signing key
      * @param oldSigningKey The old signing key
      */
     event SigningKeyUpdate(
-        address indexed operator, uint256 blockNumber, address newSigningKey, address oldSigningKey
+        address indexed operator, uint32 epochNumber, address newSigningKey, address oldSigningKey
     );
-
-    /**
-     * @notice Emitted when an operator's weight is updated
-     * @param operator The address of the operator
-     * @param oldWeight The old weight
-     * @param newWeight The new weight
-     */
-    event OperatorWeightUpdated(address indexed operator, uint256 oldWeight, uint256 newWeight);
-
-    /**
-     * @notice Emitted when the total weight is updated
-     * @param oldTotalWeight The old total weight
-     * @param newTotalWeight The new total weight
-     */
-    event TotalWeightUpdated(uint256 oldTotalWeight, uint256 newTotalWeight);
-
-    /**
-     * @notice Emitted when the threshold weight is updated
-     * @param newThresholdWeight The new threshold weight
-     */
-    event ThresholdWeightUpdated(uint256 newThresholdWeight);
-
-    /**
-     * @notice Emitted when the minimum weight is updated
-     * @param oldMinimumWeight The old minimum weight
-     * @param newMinimumWeight The new minimum weight
-     */
-    event MinimumWeightUpdated(uint256 oldMinimumWeight, uint256 newMinimumWeight);
 
     /**
      * @notice Emitted when the quorum configuration is updated
@@ -67,75 +38,60 @@ interface ILightStakeRegistry {
      */
     event QuorumUpdated(Quorum oldQuorum, Quorum newQuorum);
 
-    function registerOperator(
-        address operator,
-        address _signingKey
-    ) external;
+    /**
+     * @notice Emitted when the threshold weight is updated
+     * @param newThresholdWeight The new threshold weight
+     */
+    event ThresholdWeightUpdated(uint256 newThresholdWeight);
 
-    function deregisterOperator(address operator) external;
-
-    function updateOperatorSigningKey(
-        address operator,
-        address _newSigningKey
-    ) external;
-
-    function updateOperators(
-        address[] memory _operators
-    ) external;
-
-    function updateQuorumConfig(Quorum memory _quorum, address[] memory _operators) external;
-
-    function updateMinimumWeight(uint256 _newMinimumWeight, address[] memory _operators) external;
-
-    function updateStakeThreshold(
-        uint256 _thresholdWeight
-    ) external;
-
-    function updateOperatorsForQuorum(
-        address[][] memory operatorsPerQuorum
-    ) external;
+    event OperatorsUpdated(address[] operators, uint256[] newWeights, uint256 newTotalWeight);
 
     // View Functions
     function quorum() external view returns (Quorum memory);
-
-    function minimumWeight() external view returns (uint256);
 
     function getLastestOperatorSigningKey(
         address _operator
     ) external view returns (address);
 
-    function getOperatorSigningKeyAtBlock(
+    function getOperatorSigningKeyAtEpoch(
         address _operator,
-        uint256 _blockNumber
+        uint32 _epochNumber
     ) external view returns (address);
 
+    function getLastCheckpointOperatorWeight(
+        address _operator
+    ) external view returns (uint256);
+
+    function getLastCheckpointTotalWeight() external view returns (uint256);
+
+    function getLastCheckpointThresholdWeight() external view returns (uint256);
+
+    function getOperatorWeightAtEpoch(
+        address _operator,
+        uint32 _epochNumber
+    ) external view returns (uint256);
+
+    function getTotalWeightAtEpoch(
+        uint32 _epochNumber
+    ) external view returns (uint256);
+
+    function getLastCheckpointThresholdWeightAtEpoch(
+        uint32 _epochNumber
+    ) external view returns (uint256);
+
     function operatorRegistered(
-        address operator
+        address _operator
     ) external view returns (bool);
 
-    function getOperatorWeight(
-        address operator
-    ) external view returns (uint256);
-
-    function getOperatorWeightAtBlock(
-        address operator,
-        uint32 blockNumber
-    ) external view returns (uint256);
-
-    function getLastCheckpointOperatorWeight(
-        address operator
-    ) external view returns (uint256);
-
-    function getLastCheckpointTotalWeightAtBlock(
-        uint32 blockNumber
-    ) external view returns (uint256);
-
-    function getLastCheckpointThresholdWeightAtBlock(
-        uint32 blockNumber
-    ) external view returns (uint256);
+    function minimumWeight() external view returns (uint256);
 
     function isValidSignature(
         bytes32 _dataHash,
         bytes memory _signatureData
     ) external view returns (bytes4);
+
+    // State changing functions
+    function processEpochUpdate(
+        IEpochManager.StateUpdate[] memory updates
+    ) external;
 }

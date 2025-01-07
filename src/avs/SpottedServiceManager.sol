@@ -2,19 +2,20 @@
 pragma solidity ^0.8.26;
 
 import {Initializable} from "@openzeppelin-upgrades/contracts/proxy/utils/Initializable.sol";
-import {ECDSAServiceManagerBase} from
-    "@eigenlayer-middleware/src/unaudited/ECDSAServiceManagerBase.sol";
-import {ECDSAStakeRegistry} from "@eigenlayer-middleware/src/unaudited/ECDSAStakeRegistry.sol";
-import {ECDSAUpgradeable} from
-    "@openzeppelin-upgrades/contracts/utils/cryptography/ECDSAUpgradeable.sol";
-import {IERC1271Upgradeable} from
-    "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
-import {PausableUpgradeable} from
-    "@openzeppelin-upgrades/contracts/security/PausableUpgradeable.sol";
+import {ECDSAServiceManagerBase} from "@eigenlayer-middleware/src/unaudited/ECDSAServiceManagerBase.sol";
+import {ECDSAStakeRegistry} from "./ECDSAStakeRegistry.sol";
+import {ECDSAUpgradeable} from "@openzeppelin-upgrades/contracts/utils/cryptography/ECDSAUpgradeable.sol";
+import {IERC1271Upgradeable} from "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-upgrades/contracts/security/PausableUpgradeable.sol";
 import {IPauserRegistry} from "@eigenlayer/contracts/interfaces/IPauserRegistry.sol";
 import {ISignatureUtils} from "@eigenlayer/contracts/interfaces/ISignatureUtils.sol";
 import {IStateDisputeResolver} from "../interfaces/IStateDisputeResolver.sol";
 import "../interfaces/ISpottedServiceManager.sol";
+
+/// @title SpottedServiceManager
+/// @author Spotted Team
+/// @notice Service manager for the Spotted Oracle AVS that handles operator registration 
+/// @dev Inherits from ECDSAServiceManagerBase and implements ISpottedServiceManager interface
 
 contract SpottedServiceManager is
     Initializable,
@@ -24,179 +25,75 @@ contract SpottedServiceManager is
 {
     using ECDSAUpgradeable for bytes32;
 
-    // Task tracking
-    mapping(address => mapping(bytes32 => TaskResponse)) private _taskResponses;
-
-    // State variables
-    IStateDisputeResolver public immutable disputeResolver;
-
-    // Task response confirmer mapping
-    mapping(address => bool) public isTaskResponseConfirmer;
-
-    modifier onlyTaskResponseConfirmer() {
-        if (!isTaskResponseConfirmer[msg.sender]) {
-            revert SpottedServiceManager__CallerNotTaskResponseConfirmer();
-        }
-        _;
-    }
-
-    modifier onlyDisputeResolver() {
-        if (msg.sender != address(disputeResolver)) {
-            revert SpottedServiceManager__CallerNotDisputeResolver();
-        }
-        _;
-    }
-
+    /// @notice Constructor that sets up the base service manager components
+    /// @param _avsDirectory Address of the AVS directory contract (mainnet)
+    /// @param _stakeRegistry Address of the stake registry contract (mainnet)
+    /// @param _rewardsCoordinator Address of the rewards coordinator contract (mainnet)
+    /// @param _delegationManager Address of the delegation manager contract (mainnet)
     constructor(
         address _avsDirectory,
         address _stakeRegistry,
         address _rewardsCoordinator,
-        address _delegationManager,
-        address _disputeResolver
+        address _delegationManager
     )
         ECDSAServiceManagerBase(_avsDirectory, _stakeRegistry, _rewardsCoordinator, _delegationManager)
     {
-        _disableInitializers();
-        disputeResolver = IStateDisputeResolver(_disputeResolver);
+        _disableInitializers();     
     }
 
+    /// @notice Initializes the contract with required addresses and configurations
+    /// @param initialOwner Address that will own the contract
+    /// @param initialRewardsInitiator Address that can submit rewards to the rewards coordinator
+    /// @param pauserRegistry Address of the pauser registry contract
     function initialize(
         address initialOwner,
         address initialRewardsInitiator,
-        IPauserRegistry pauserRegistry,
-        address[] memory initialConfirmers
+        IPauserRegistry pauserRegistry
     ) external initializer {
         __Ownable_init();
         __Pausable_init();
         __ServiceManagerBase_init(initialOwner, address(pauserRegistry));
         _setRewardsInitiator(initialRewardsInitiator);
-
-        // Set initial confirmers
-        uint256 initialConfirmersLength = initialConfirmers.length;
-        for (uint256 i = 0; i < initialConfirmersLength;) {
-            _setTaskResponseConfirmer(initialConfirmers[i], true);
-            unchecked {
-                ++i;
-            }
-        }
     }
 
-    function setTaskResponseConfirmer(address confirmer, bool status) external onlyOwner {
-        _setTaskResponseConfirmer(confirmer, status);
-    }
-
-    function respondToTask(
-        Task calldata task,
-        bytes memory signatureData
-    ) external override whenNotPaused onlyTaskResponseConfirmer {
-        // 验证taskId是否正确生成
-        bytes32 computedTaskId = generateTaskId(
-            task.user,
-            task.chainId,
-            task.blockNumber,
-            task.key,
-            task.value
-        );
-        if (computedTaskId != task.taskId) {
-            revert SpottedServiceManager__InvalidTaskId();
-        }
-
-        // Decode signature data
-        (address[] memory operators,,) = abi.decode(signatureData, (address[], bytes[], uint32));
-
-        // 直接使用 taskId 作为消息哈希
-        bytes32 ethSignedMessageHash = task.taskId.toEthSignedMessageHash();
-        bytes4 magicValue = IERC1271Upgradeable.isValidSignature.selector;
-
-        // verify quorum signatures
-        if (
-            magicValue
-                != ECDSAStakeRegistry(stakeRegistry).isValidSignature(
-                    ethSignedMessageHash, signatureData
-                )
-        ) {
-            revert SpottedServiceManager__InvalidSignature();
-        }
-
-        // record response for each signing operator
-        uint256 operatorsLength = operators.length;
-        for (uint256 i = 0; i < operatorsLength;) {
-            _taskResponses[operators[i]][task.taskId] = TaskResponse({
-                task: task,
-                responseBlock: uint64(block.number),
-                challenged: false,
-                resolved: false
-            });
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit TaskResponded(task.taskId, task, msg.sender);
-    }
-
-    function handleChallengeSubmission(
-        address operator,
-        bytes32 taskId
-    ) external onlyDisputeResolver {
-        TaskResponse storage response = _taskResponses[operator][taskId];
-        if (response.challenged) {
-            revert SpottedServiceManager__TaskAlreadyChallenged();
-        }
-        response.challenged = true;
-        emit TaskChallenged(operator, taskId);
-    }
-
-    function handleChallengeResolution(
-        address operator,
-        bytes32 taskId,
-        bool challengeSuccessful
-    ) external onlyDisputeResolver {
-        TaskResponse storage response = _taskResponses[operator][taskId];
-        if (!response.challenged) {
-            revert SpottedServiceManager__TaskNotChallenged();
-        }
-        if (response.resolved) {
-            revert SpottedServiceManager__TaskAlreadyResolved();
-        }
-
-        response.resolved = true;
-        emit ChallengeResolved(operator, taskId, challengeSuccessful);
-    }
-
+    /// @notice Registers an operator to the AVS
+    /// @param operator Address of the operator to register
+    /// @param operatorSignature Signature data from the operator
+    /// @dev Only callable by stake registry
     function registerOperatorToAVS(
         address operator,
         ISignatureUtils.SignatureWithSaltAndExpiry memory operatorSignature
-    ) external override onlyStakeRegistry {
+    ) external override(ECDSAServiceManagerBase, ISpottedServiceManager) onlyStakeRegistry {
         _registerOperatorToAVS(operator, operatorSignature);
     }
 
-    function getTaskResponse(
-        address operator,
-        bytes32 taskId
-    ) external view override returns (TaskResponse memory) {
-        return _taskResponses[operator][taskId];
+    /// @notice Deregisters an operator from the AVS
+    /// @param operator Address of the operator to deregister
+    /// @dev Only callable by stake registry
+    function deregisterOperatorFromAVS(
+        address operator
+    ) external override(ECDSAServiceManagerBase, ISpottedServiceManager) onlyStakeRegistry {
+        _deregisterOperatorFromAVS(operator);
     }
-    
+
+    /// @notice Generates a unique task ID from input parameters
+    /// @param user Address of the user initiating the task
+    /// @param chainId ID of the chain where the task is executed
+    /// @param blockNumber Block number associated with the task
+    /// @param timestamp Time when the task was created
+    /// @param epoch Epoch number when the task was created
+    /// @param key Task-specific key parameter
+    /// @param value Task-specific value parameter
+    /// @return bytes32 Unique identifier for the task
     function generateTaskId(
         address user,
         uint32 chainId,
         uint64 blockNumber,
+        uint48 timestamp,
+        uint32 epoch,
         uint256 key,
         uint256 value
     ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(
-            user,
-            chainId,
-            blockNumber,
-            key,
-            value
-        ));
-    }
-
-    function _setTaskResponseConfirmer(address confirmer, bool status) internal {
-        if (confirmer == address(0)) revert SpottedServiceManager__InvalidAddress();
-        isTaskResponseConfirmer[confirmer] = status;
-        emit TaskResponseConfirmerSet(confirmer, status);
+        return keccak256(abi.encodePacked(user, chainId, blockNumber, timestamp, epoch, key, value));
     }
 }

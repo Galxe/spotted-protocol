@@ -169,3 +169,10 @@ function getChallenge(bytes32 challengeId) external view returns (Challenge memo
 function currentOperatorSetId() external view returns (uint32)
 function getStateManager(uint256 chainId) external view returns (address)
 ```
+
+
+
+// 由avs 提交 challenge 
+1. avs 没有operators的签名无法slash
+2. operators或者malicious user不能提交错误或者遗漏的signature
+3. avs 倾向惩罚所有作恶者维护服务 所以不会提交错误或遗漏的signature

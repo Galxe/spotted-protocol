@@ -1,96 +1,170 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+import {IRegistryStateSender} from "../interfaces/IRegistryStateSender.sol";
 import {IAbridge} from "../interfaces/IAbridge.sol";
-import {IECDSAStakeRegistry} from "../interfaces/IECDSAStakeRegistry.sol";
-import {Ownable2Step, Ownable} from "@openzeppelin-v5.0.0/contracts/access/Ownable2Step.sol";
+import {Ownable} from "@openzeppelin-v5.0.0/contracts/access/Ownable.sol";
+import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
-contract RegistryStateSender is Ownable2Step {
-    IECDSAStakeRegistry public immutable stakeRegistry;
-    IAbridge public immutable abridge;
-    address public immutable receiver;
+/// @title Registry State Sender
+/// @author Spotted Team
+/// @notice Manages cross-chain state synchronization for the stake registry
+/// @dev Handles sending state updates to other chains through bridges
+contract RegistryStateSender is IRegistryStateSender, Ownable {
+    /// @notice Address of the epoch manager contract
+    /// @dev Immutable after deployment
+    address public immutable epochManager;
 
-    // gas limit for cross chain message
-    uint128 private constant EXECUTE_GAS_LIMIT = 500_000;
+    /// @notice Mapping of chain IDs to their bridge configurations
+    /// @dev Contains bridge address and receiver address for each supported chain
+    mapping(uint256 => BridgeInfo) public chainToBridgeInfo;
 
-    error InsufficientFee();
-    error WithdrawFailed();
+    /// @notice List of all supported chain IDs
+    /// @dev Used to track and iterate over supported chains
+    uint256[] public supportedChainIds;
 
+    /// @notice Gas limit for cross-chain message execution
+    /// @dev Fixed value to ensure consistent gas costs
+    uint128 public constant EXECUTE_GAS_LIMIT = 500_000;
+
+    /// @notice Ensures only the epoch manager can call certain functions
+    /// @dev Reverts if caller is not the epoch manager
+    modifier onlyEpochManager() {
+        if (msg.sender != address(epochManager)) revert RegistryStateSender__InvalidSender();
+        _;
+    }
+
+    /// @notice Initializes the contract with bridge configurations
+    /// @param _chainIds Array of chain IDs to support
+    /// @param _bridges Array of bridge contract addresses for each chain
+    /// @param _receivers Array of receiver contract addresses for each chain
+    /// @param _owner Address of the contract owner
+    /// @param _epochManager Address of the epoch manager contract
+    /// @dev Arrays must be of equal length
     constructor(
-        address _stakeRegistry,
-        address _abridge,
-        address _receiver,
-        address _owner
+        uint256[] memory _chainIds,
+        address[] memory _bridges,
+        address[] memory _receivers,
+        address _owner,
+        address _epochManager
     ) Ownable(_owner) {
-        stakeRegistry = IECDSAStakeRegistry(_stakeRegistry);
-        abridge = IAbridge(_abridge);
-        receiver = _receiver;
+        epochManager = _epochManager;
+        if (_chainIds.length != _bridges.length || _bridges.length != _receivers.length) {
+            revert RegistryStateSender__InvalidBridgeInfo();
+        }
+
+        for (uint256 i = 0; i < _chainIds.length; i++) {
+            _addBridge(_chainIds[i], _bridges[i], _receivers[i]);
+        }
     }
 
-    receive() external payable {}
-
-    // Withdraw unused bridge fees
-    function withdraw(
-        address to
+    /// @notice Adds a new bridge configuration for a chain
+    /// @param _chainId The ID of the chain to add
+    /// @param _bridge The address of the bridge contract
+    /// @param _receiver The address of the receiver contract
+    /// @dev Only callable by owner
+    function addBridge(
+        uint256 _chainId,
+        address _bridge,
+        address _receiver
     ) external onlyOwner {
-        uint256 amount = address(this).balance;
-        (bool success,) = to.call{value: amount}("");
-        if (!success) revert WithdrawFailed();
-        emit FundsWithdrawn(to, amount);
+        _addBridge(_chainId, _bridge, _receiver);
     }
 
-    // sync all operators state
-    function syncAllOperators() external payable {
-        // get all operators data
-        (address[] memory operators, uint256[] memory weights, address[] memory signingKeys) =
-            getAllOperatorsData();
-
-        // encode data
-        bytes memory operatorsData = abi.encode(operators, weights, signingKeys);
-
-        // estimate fee
-        (, uint256 fee) = abridge.estimateFee(receiver, EXECUTE_GAS_LIMIT, operatorsData);
-        if (msg.value < fee) revert InsufficientFee();
-
-        // send through bridge
-        abridge.send{value: msg.value}(receiver, EXECUTE_GAS_LIMIT, operatorsData);
-    }
-
-    // get all operators data
-    function getAllOperatorsData()
-        public
-        view
-        returns (address[] memory operators, uint256[] memory weights, address[] memory signingKeys)
-    {
-        // Get total operators count from registry
-        uint256 totalOperators = stakeRegistry.minimumWeight();
-
-        // Initialize arrays
-        operators = new address[](totalOperators);
-        weights = new uint256[](totalOperators);
-        signingKeys = new address[](totalOperators);
-
-        // Collect data for each operator
-        uint256 index = 0;
-        for (uint256 i = 0; i < totalOperators;) {
-            if (stakeRegistry.operatorRegistered(operators[i])) {
-                operators[index] = operators[i];
-                weights[index] = stakeRegistry.getLastCheckpointOperatorWeight(operators[i]);
-                signingKeys[index] = stakeRegistry.getLastestOperatorSigningKey(operators[i]);
-                index++;
-            }
-            unchecked {
-                ++i;
-            }
+    /// @notice Removes a bridge configuration for a chain
+    /// @param _chainId The ID of the chain to remove
+    /// @dev Only callable by owner
+    function removeBridge(uint256 _chainId) external onlyOwner {
+        if (chainToBridgeInfo[_chainId].bridge == address(0)) {
+            revert RegistryStateSender__ChainNotSupported();
         }
 
-        // resize arrays to actual size
-        assembly {
-            mstore(operators, index)
-            mstore(weights, index)
-            mstore(signingKeys, index)
+        delete chainToBridgeInfo[_chainId];
+
+        for (uint256 i = 0; i < supportedChainIds.length; i++) {
+            if (supportedChainIds[i] == _chainId) {
+                supportedChainIds[i] = supportedChainIds[supportedChainIds.length - 1];
+                supportedChainIds.pop();
+                break;
+            }
         }
     }
 
-    event FundsWithdrawn(address indexed to, uint256 amount);
+    /// @notice Internal function to add a bridge configuration
+    /// @param _chainId The ID of the chain to add
+    /// @param _bridge The address of the bridge contract
+    /// @param _receiver The address of the receiver contract
+    /// @dev Validates addresses and prevents duplicate bridges
+    function _addBridge(
+        uint256 _chainId,
+        address _bridge,
+        address _receiver
+    ) internal {
+        if (_bridge == address(0) || _receiver == address(0)) {
+            revert RegistryStateSender__InvalidBridgeInfo();
+        }
+        if (chainToBridgeInfo[_chainId].bridge != address(0)) {
+            revert RegistryStateSender__BridgeAlreadyExists();
+        }
+
+        chainToBridgeInfo[_chainId] = BridgeInfo({bridge: _bridge, receiver: _receiver});
+        supportedChainIds.push(_chainId);
+    }
+
+    /// @notice Sends batch updates to a target chain
+    /// @param epoch The current epoch number
+    /// @param chainId The ID of the target chain
+    /// @param updates Array of state updates to send
+    /// @dev Only callable by epoch manager, requires sufficient fee
+    function sendBatchUpdates(
+        uint256 epoch,
+        uint256 chainId,
+        IEpochManager.StateUpdate[] memory updates
+    ) external payable onlyEpochManager {
+        BridgeInfo memory bridgeInfo = chainToBridgeInfo[chainId];
+        if (bridgeInfo.bridge == address(0)) revert RegistryStateSender__ChainNotSupported();
+
+        bytes memory data = abi.encode(epoch, updates);
+
+        (, uint256 fee) = IAbridge(bridgeInfo.bridge).estimateFee(
+            bridgeInfo.receiver,
+            EXECUTE_GAS_LIMIT,
+            data
+        );
+
+        if (msg.value < fee) revert RegistryStateSender__InsufficientFee();
+
+        IAbridge(bridgeInfo.bridge).send{value: fee}(bridgeInfo.receiver, EXECUTE_GAS_LIMIT, data);
+    }
+
+    /// @notice Modifies an existing bridge configuration
+    /// @param _chainId The ID of the chain to modify
+    /// @param _newBridge The new bridge contract address
+    /// @param _newReceiver The new receiver contract address
+    /// @dev Only callable by owner
+    function modifyBridge(
+        uint256 _chainId,
+        address _newBridge,
+        address _newReceiver
+    ) external onlyOwner {
+        if (chainToBridgeInfo[_chainId].bridge == address(0)) {
+            revert RegistryStateSender__ChainNotSupported();
+        }
+        if (_newBridge == address(0) || _newReceiver == address(0)) {
+            revert RegistryStateSender__InvalidBridgeInfo();
+        }
+
+        chainToBridgeInfo[_chainId] = BridgeInfo({bridge: _newBridge, receiver: _newReceiver});
+
+        emit BridgeModified(_chainId, _newBridge, _newReceiver);
+    }
+
+    /// @notice Gets bridge configuration for a chain
+    /// @param chainId The ID of the chain to query
+    /// @return Bridge configuration information
+    function getBridgeInfoByChainId(
+        uint256 chainId
+    ) external view returns (BridgeInfo memory) {
+        return chainToBridgeInfo[chainId];
+    }
 }

@@ -11,7 +11,7 @@ import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
 library LightEpochCheckpointsUpgradeable {
     error InvalidEpoch();
 
-    address public constant STATE_RECEIVER = 0x0000000000000000000000000000000000000000; // 需要替换为实际地址
+    address public constant STATE_RECEIVER = 0x0000000000000000000000000000000000000000; // dummy address
 
     struct Checkpoint {
         uint32 _epochNumber;

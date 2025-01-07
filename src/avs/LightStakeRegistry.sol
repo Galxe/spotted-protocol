@@ -17,6 +17,10 @@ import {ILightStakeRegistry} from "../interfaces/ILightStakeRegistry.sol";
 import {EpochCheckpointsUpgradeable} from "../libraries/EpochCheckpointsUpgradeable.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
+/// @title Light Stake Registry
+/// @author Spotted Team
+/// @notice A lightweight version of stake registry for managing operator stakes and quorum configurations
+
 contract LightStakeRegistry is
     IERC1271Upgradeable,
     OwnableUpgradeable,
@@ -29,11 +33,11 @@ contract LightStakeRegistry is
         address _epochManager,
         address _registryStateReceiver
     ) LightStakeRegistryStorage(_epochManager, _registryStateReceiver) {
-        // _disableInitializers();
+        _disableInitializers();
     }
 
     modifier onlyStateReceiver() {
-        require(msg.sender == address(REGISTRY_STATE_RECEIVER), "Invalid sender");
+        if (msg.sender != address(REGISTRY_STATE_RECEIVER)) revert InvalidSender();
         _;
     }
 
@@ -47,6 +51,46 @@ contract LightStakeRegistry is
         __LightStakeRegistry_init(_thresholdWeight, _initialQuorum);
     }
 
+
+    /// @notice Processes updates for a new epoch
+    /// @param epoch The new epoch number
+    /// @param updates Array of state updates to process
+    /// @dev Only callable by the state receiver
+    function processEpochUpdate(
+        uint256 epoch,
+        IEpochManager.StateUpdate[] memory updates
+    ) external onlyStateReceiver {
+        if (epoch < EPOCH_MANAGER.currentEpoch() + 1) revert InvalidEpoch();
+        uint256 updatesLength = updates.length;
+        for (uint256 i = 0; i < updatesLength; ) {
+            IEpochManager.StateUpdate memory update = updates[i];
+
+            if (update.updateType == IEpochManager.MessageType.REGISTER) {
+                _handleRegister(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.DEREGISTER) {
+                _handleDeregister(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_SIGNING_KEY) {
+                _handleUpdateSigningKey(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS) {
+                _handleUpdateOperators(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_QUORUM) {
+                _handleUpdateQuorum(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_MIN_WEIGHT) {
+                _handleUpdateMinWeight(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_THRESHOLD) {
+                _handleUpdateThreshold(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS_FOR_QUORUM) {
+                _handleUpdateOperatorsForQuorum(update.data);
+            } else {
+                revert InvalidMessageType();
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
     /// @notice Verifies if the provided signature data is valid for the given data hash.
     /// @param _dataHash The hash of the data that was signed.
     /// @param _signatureData Encoded signature data consisting of an array of operators, an array of signatures, and a reference block number.
@@ -57,6 +101,9 @@ contract LightStakeRegistry is
     ) external view returns (bytes4) {
         (address[] memory operators, bytes[] memory signatures, uint32 referenceEpoch) =
             abi.decode(_signatureData, (address[], bytes[], uint32));
+        if (referenceEpoch > EPOCH_MANAGER.currentEpoch()) {
+                revert InvalidEpoch();
+        }
         _checkSignatures(_dataHash, operators, signatures, referenceEpoch);
         return IERC1271Upgradeable.isValidSignature.selector;
     }
@@ -67,23 +114,19 @@ contract LightStakeRegistry is
         return _quorum;
     }
 
-    /**
-     * @notice Retrieves the latest signing key for a given operator.
-     * @param _operator The address of the operator.
-     * @return The latest signing key of the operator.
-     */
+    /// @notice Retrieves the latest signing key for a given operator.
+    /// @param _operator The address of the operator.
+    /// @return The latest signing key of the operator.
     function getLastestOperatorSigningKey(
         address _operator
     ) external view returns (address) {
         return address(uint160(_operatorSigningKeyHistory[_operator].latest()));
     }
 
-    /**
-     * @notice Retrieves the latest signing key for a given operator at a specific block number.
-     * @param _operator The address of the operator.
-     * @param _epochNumber The epoch number to get the operator's signing key.
-     * @return The signing key of the operator at the given epoch.
-     */
+    /// @notice Retrieves the latest signing key for a given operator at a specific block number.
+    /// @param _operator The address of the operator.
+    /// @param _epochNumber The epoch number to get the operator's signing key.
+    /// @return The signing key of the operator at the given epoch.
     function getOperatorSigningKeyAtEpoch(
         address _operator,
         uint32 _epochNumber
@@ -153,8 +196,9 @@ contract LightStakeRegistry is
     }
 
     /// @notice Initializes state for the StakeRegistry
-    /// @param _thresholdWeight The threshold weight in basis points.
-    /// @param _initialQuorum The initial quorum struct containing the details of the quorum thresholds.
+    /// @param _thresholdWeight The threshold weight in basis points for quorum validation
+    /// @param _initialQuorum The initial quorum configuration containing strategy parameters
+    /// @dev This function can only be called once through the proxy
     function __LightStakeRegistry_init(
         uint256 _thresholdWeight,
         Quorum memory _initialQuorum
@@ -164,13 +208,12 @@ contract LightStakeRegistry is
         __Ownable_init();
     }
 
-    /**
-     * @notice Common logic to verify a batch of ECDSA signatures against a hash, using either last stake weight or at a specific block.
-     * @param _dataHash The hash of the data the signers endorsed.
-     * @param _operators A collection of addresses that endorsed the data hash.
-     * @param _signatures A collection of signatures matching the signers.
-     * @param _referenceEpoch The epoch number for evaluating stake weight; use max uint32 for latest weight.
-     */
+    /// @notice Common logic to verify a batch of ECDSA signatures against a hash
+    /// @param _dataHash The hash of the data the signers endorsed
+    /// @param _operators A collection of addresses that endorsed the data hash
+    /// @param _signatures A collection of signatures matching the signers
+    /// @param _referenceEpoch The epoch number for evaluating stake weight; use max uint32 for latest
+    /// @dev Validates signatures, checks signer order, and verifies threshold stake
     function _checkSignatures(
         bytes32 _dataHash,
         address[] memory _operators,
@@ -200,9 +243,10 @@ contract LightStakeRegistry is
         _validateThresholdStake(signedWeight, _referenceEpoch);
     }
 
-    /// @notice Validates that the number of signers equals the number of signatures, and neither is zero.
-    /// @param _signersLength The number of signers.
-    /// @param _signaturesLength The number of signatures.
+    /// @notice Validates that the number of signers equals the number of signatures
+    /// @param _signersLength The number of signers
+    /// @param _signaturesLength The number of signatures
+    /// @dev Reverts if lengths don't match or if either is zero
     function _validateSignaturesLength(
         uint256 _signersLength,
         uint256 _signaturesLength
@@ -215,19 +259,21 @@ contract LightStakeRegistry is
         }
     }
 
-    /// @notice Ensures that signers are sorted in ascending order by address.
-    /// @param _lastSigner The address of the last signer.
-    /// @param _currentSigner The address of the current signer.
+    /// @notice Ensures that signers are sorted in ascending order by address
+    /// @param _lastSigner The address of the last signer
+    /// @param _currentSigner The address of the current signer
+    /// @dev Reverts if addresses are not in ascending order
     function _validateSortedSigners(address _lastSigner, address _currentSigner) internal pure {
         if (_lastSigner >= _currentSigner) {
             revert NotSorted();
         }
     }
 
-    /// @notice Validates a given signature against the signer's address and data hash.
-    /// @param _signer The address of the signer to validate.
-    /// @param _dataHash The hash of the data that is signed.
-    /// @param _signature The signature to validate.
+    /// @notice Validates a given signature against the signer's address and data hash
+    /// @param _signer The address of the signer to validate
+    /// @param _dataHash The hash of the data that is signed
+    /// @param _signature The signature to validate
+    /// @dev Uses EIP-1271 for smart contract signatures
     function _validateSignature(
         address _signer,
         bytes32 _dataHash,
@@ -238,6 +284,9 @@ contract LightStakeRegistry is
         }
     }
 
+    /// @notice Updates the stake threshold for quorum validation
+    /// @param _thresholdWeight The new threshold weight to set
+    /// @dev Emits ThresholdWeightUpdated event
     function _updateStakeThreshold(
         uint256 _thresholdWeight
     ) internal {
@@ -246,20 +295,18 @@ contract LightStakeRegistry is
     }
 
     /// @notice Updates the quorum configuration
-    /// @dev Replaces the current quorum configuration with `_newQuorum` if valid.
-    /// Reverts with `InvalidQuorum` if the new quorum configuration is not valid.
-    /// Emits `QuorumUpdated` event with the old and new quorum configurations.
-    /// @param _newQuorum The new quorum configuration to set.
+    /// @param _newQuorum The new quorum configuration to set
+    /// @dev Replaces current quorum config and emits QuorumUpdated event
     function _updateQuorumConfig(
         Quorum memory _newQuorum
     ) internal {
-        // 获取当前的quorum配置作为oldQuorum
+        // get current quorum config as oldQuorum
         Quorum memory oldQuorum = Quorum({strategies: _quorum.strategies});
 
-        // 清除当前quorum配置
+        // clear current quorum config
         delete _quorum.strategies;
 
-        // 设置新的quorum配置
+        // set new quorum config
         for (uint256 i; i < _newQuorum.strategies.length; i++) {
             _quorum.strategies.push(_newQuorum.strategies[i]);
         }
@@ -267,10 +314,10 @@ contract LightStakeRegistry is
         emit QuorumUpdated(oldQuorum, _newQuorum);
     }
 
-    /// @notice Retrieves the operator weight for a signer, either at the last checkpoint or a specified block.
-    /// @param _operator The operator to query their signing key history for
-    /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
-    /// @return The weight of the operator.
+    /// @notice Retrieves the operator's signing key at a specific epoch
+    /// @param _operator The operator to query
+    /// @param _referenceEpoch The epoch number to query at
+    /// @return The signing key address for the operator at the given epoch
     function _getOperatorSigningKey(
         address _operator,
         uint32 _referenceEpoch
@@ -278,10 +325,10 @@ contract LightStakeRegistry is
         return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_referenceEpoch)));
     }
 
-    /// @notice Retrieves the operator weight for a signer, either at the last checkpoint or a specified block.
-    /// @param _operator The operator to query their signing key history for
-    /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
-    /// @return The weight of the operator.
+    /// @notice Retrieves the operator's weight at a specific epoch
+    /// @param _operator The operator to query
+    /// @param _referenceEpoch The epoch number to query at
+    /// @return The weight of the operator at the given epoch
     function _getOperatorWeight(
         address _operator,
         uint32 _referenceEpoch
@@ -289,28 +336,28 @@ contract LightStakeRegistry is
         return _operatorWeightHistory[_operator].getAtEpoch(_referenceEpoch);
     }
 
-    /// @notice Retrieve the total stake weight at a specific epoch or the latest if not specified.
-    /// @param _referenceEpoch The epoch number to retrieve the total stake weight from.
-    /// @return The total stake weight at the given epoch or the latest if the given epoch is the max uint32 value.
+    /// @notice Retrieves the total stake weight at a specific epoch
+    /// @param _referenceEpoch The epoch number to query at
+    /// @return The total stake weight at the given epoch
     function _getTotalWeight(
         uint32 _referenceEpoch
     ) internal view returns (uint256) {
         return _totalWeightHistory.getAtEpoch(_referenceEpoch);
     }
 
-    /// @notice Retrieves the threshold stake for a given reference block.
-    /// @param _referenceEpoch The epoch number to query the threshold stake for.
-    /// If set to the maximum uint32 value, it retrieves the latest threshold stake.
-    /// @return The threshold stake in basis points for the reference block.
+    /// @notice Retrieves the threshold stake at a specific epoch
+    /// @param _referenceEpoch The epoch number to query at
+    /// @return The threshold stake at the given epoch
     function _getThresholdStake(
         uint32 _referenceEpoch
     ) internal view returns (uint256) {
         return _thresholdWeightHistory.getAtEpoch(_referenceEpoch);
     }
 
-    /// @notice Validates that the cumulative stake of signed messages meets or exceeds the required threshold.
-    /// @param _signedWeight The cumulative weight of the signers that have signed the message.
-    /// @param _referenceEpoch The epoch number to verify the stake threshold for
+    /// @notice Validates that signed weight meets threshold requirements
+    /// @param _signedWeight The cumulative weight of signers
+    /// @param _referenceEpoch The epoch number to verify against
+    /// @dev Reverts if weight is invalid or insufficient
     function _validateThresholdStake(uint256 _signedWeight, uint32 _referenceEpoch) internal view {
         uint256 totalWeight = _getTotalWeight(_referenceEpoch);
         if (_signedWeight > totalWeight) {
@@ -322,40 +369,9 @@ contract LightStakeRegistry is
         }
     }
 
-    function processEpochUpdate(
-        uint256 epoch,
-        IEpochManager.StateUpdate[] memory updates
-    ) external onlyStateReceiver {
-        require(epoch >= EPOCH_MANAGER.currentEpoch() + 1, "Invalid epoch");
-
-        // 处理每个update
-        for (uint256 i = 0; i < updates.length; i++) {
-            IEpochManager.StateUpdate memory update = updates[i];
-
-            // 根据消息类型调用对应的处理函数
-            if (update.updateType == IEpochManager.MessageType.REGISTER) {
-                _handleRegister(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.DEREGISTER) {
-                _handleDeregister(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.UPDATE_SIGNING_KEY) {
-                _handleUpdateSigningKey(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS) {
-                _handleUpdateOperators(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.UPDATE_QUORUM) {
-                _handleUpdateQuorum(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.UPDATE_MIN_WEIGHT) {
-                _handleUpdateMinWeight(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.UPDATE_THRESHOLD) {
-                _handleUpdateThreshold(update.data);
-            } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS_FOR_QUORUM) {
-                _handleUpdateOperatorsForQuorum(update.data);
-            } else {
-                revert("Invalid message type");
-            }
-        }
-    }
-
-    // 处理注册操作
+    /// @notice Handles the registration of a new operator
+    /// @param data Encoded data containing operator details (operator address, signing key, weights)
+    /// @dev Decodes data and updates operator registration state
     function _handleRegister(
         bytes memory data
     ) internal {
@@ -371,6 +387,9 @@ contract LightStakeRegistry is
         emit OperatorRegistered(operator);
     }
 
+    /// @notice Handles the deregistration of an existing operator
+    /// @param data Encoded data containing operator details (operator address, weights)
+    /// @dev Decodes data and updates operator registration state
     function _handleDeregister(
         bytes memory data
     ) internal {
@@ -379,14 +398,15 @@ contract LightStakeRegistry is
 
         _totalOperators -= 1;
         delete _operatorRegistered[operator];
-
-        // 更新operator的weight和total weight
         _operatorWeightHistory[operator].push(newWeight);
         _totalWeightHistory.push(newTotalWeight);
 
         emit OperatorDeregistered(operator);
     }
 
+    /// @notice Handles updating an operator's signing key
+    /// @param data Encoded data containing operator and new signing key
+    /// @dev Only updates if new key is different from current key
     function _handleUpdateSigningKey(
         bytes memory data
     ) internal {
@@ -401,13 +421,16 @@ contract LightStakeRegistry is
         emit SigningKeyUpdate(operator, newSigningKey, oldSigningKey);
     }
 
+    /// @notice Handles updating multiple operators' weights
+    /// @param data Encoded data containing operators array and their new weights
+    /// @dev Updates weights for multiple operators and total weight
     function _handleUpdateOperators(
         bytes memory data
     ) internal {
         (address[] memory operators, uint256[] memory newWeights, uint256 newTotalWeight) =
             abi.decode(data, (address[], uint256[], uint256));
         uint256 operatorsLength = operators.length;
-        // update each operator's weight
+        
         for (uint256 i = 0; i < operatorsLength;) {
             _operatorWeightHistory[operators[i]].push(newWeights[i]);
             unchecked {
@@ -415,10 +438,12 @@ contract LightStakeRegistry is
             }
         }
 
-        // update total weight
         _totalWeightHistory.push(newTotalWeight);
     }
 
+    /// @notice Handles updating quorum configuration and operator weights
+    /// @param data Encoded data containing new quorum config and operator weights
+    /// @dev Updates both quorum config and operator weights atomically
     function _handleUpdateQuorum(
         bytes memory data
     ) internal {
@@ -429,18 +454,18 @@ contract LightStakeRegistry is
             uint256 newTotalWeight
         ) = abi.decode(data, (Quorum, address[], uint256[], uint256));
 
-        // update quorum config using storage variable directly
         _updateQuorumConfig(newQuorumConfig);
 
-        // update operators' weight
         for (uint256 i = 0; i < operators.length; i++) {
             _operatorWeightHistory[operators[i]].push(newWeights[i]);
         }
 
-        // update total weight
         _totalWeightHistory.push(newTotalWeight);
     }
 
+    /// @notice Handles updating minimum weight requirement and operator weights
+    /// @param data Encoded data containing new minimum weight and operator weights
+    /// @dev Updates minimum weight threshold and affected operator weights
     function _handleUpdateMinWeight(
         bytes memory data
     ) internal {
@@ -451,33 +476,37 @@ contract LightStakeRegistry is
             uint256 newTotalWeight
         ) = abi.decode(data, (uint256, address[], uint256[], uint256));
 
-        // update minimum weight
         _minimumWeight = newMinimumWeight;
 
-        // update operators' weight
         for (uint256 i = 0; i < operators.length; i++) {
             _operatorWeightHistory[operators[i]].push(newWeights[i]);
         }
 
-        // update total weight
         _totalWeightHistory.push(newTotalWeight);
     }
 
+    /// @notice Handles updating the threshold weight
+    /// @param data Encoded data containing new threshold weight
+    /// @dev Updates the threshold weight history
     function _handleUpdateThreshold(
         bytes memory data
     ) internal {
         uint256 thresholdWeight = abi.decode(data, (uint256));
-
-        // update threshold weight
         _thresholdWeightHistory.push(thresholdWeight);
     }
 
+    /// @notice Gets the threshold weight at a specific epoch
+    /// @param _epoch The epoch number to query
+    /// @return The threshold weight at the specified epoch
     function getThresholdWeightAtEpoch(
         uint32 _epoch
     ) external view returns (uint256) {
         return _thresholdWeightHistory.getAtEpoch(_epoch);
     }
 
+    /// @notice Handles updating operators' weights for a specific quorum
+    /// @param data Encoded data containing operators and their new weights
+    /// @dev Updates weights and emits OperatorsUpdated event
     function _handleUpdateOperatorsForQuorum(
         bytes memory data
     ) internal {

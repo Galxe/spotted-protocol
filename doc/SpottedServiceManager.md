@@ -4,148 +4,109 @@
 | -------- | -------- | -------- |
 | `SpottedServiceManager.sol` | Singleton | UUPS proxy |
 
-`SpottedServiceManager` is an Active Validator Set (AVS) service manager that enables cross-chain state verification through a quorum of operators. It's built upon EigenLayer and inherits from `ECDSAServiceManager`, which secures consensus through EigenLayer's economic stake-slashing mechanism. It allows operators to respond to tasks and others to challenge potentially incorrect state claims in an optimistic pattern. The service supports:
-- Task response verification through ECDSA signatures (much cheaper than BLS)
-- State challenge lifecycle
-- Operator response history query
-- Records of all responses
+`SpottedServiceManager` is an Active Validator Set (AVS) service manager that enables cross-chain state verification through a quorum of operators. It inherits from `ECDSAServiceManagerBase` and implements additional functionality for state verification and dispute resolution.
 
-## High-level Concepts
+## Core Components
 
-1. Task response submission
-2. Challenge lifecycle
-3. Task query
-
-## Important Definitions
-
-- _Task_: A struct containing:
-  - chainId: Target chain identifier
-  - blockNumber: Block number to verify
-  - value: State value to verify
+### State Variables
 ```solidity
-    struct Task {
-        address user;
-        uint32 chainId;
-        uint64 blockNumber;
-        uint32 taskCreatedBlock;
-        uint256 key;
-        uint256 value;
+IStateDisputeResolver public immutable disputeResolver;    // Handles challenge resolution
+```
+
+### Access Control
+```solidity
+modifier onlyDisputeResolver() {
+    if (msg.sender != address(disputeResolver)) {
+        revert SpottedServiceManager__CallerNotDisputeResolver();
     }
-```
-- _TaskResponse_: A struct containing:
-  - task: The original task data
-  - responseBlock: Block number when response was submitted
-  - challenged: Whether response has been challenged
-  - resolved: Whether challenge has been resolved
-
-```solidity
-    struct TaskResponse {
-        Task task;
-        uint64 responseBlock;
-        bool challenged;
-        bool resolved;
-    }
+    _;
+}
 ```
 
-- _TaskId_: A bytes32 identifier for a task, generated from the task struct
+## Key Functions
+
+### Constructor & Initialization
 ```solidity
-    keccak256(abi.encodePacked(
-            user,
-            chainId,
-            blockNumber,
-            key,
-            value
-        ))
+constructor(
+    address _avsDirectory,
+    address _stakeRegistry,
+    address _rewardsCoordinator,
+    address _delegationManager,
+    address _disputeResolver
+)
 ```
-- _Task Response Confirmer_: Authorized address that can submit task responses
-
-## Access Control
-
-The service implements role-based access control:
-
-- _Owner_: Can set task response confirmers
-- _Task Response Confirmer_: Can submit task responses
-- _Dispute Resolver_: Can handle challenge submissions and resolutions
-
-## Task Response
-The task response process allows authorized confirmers to submit operator responses for verification.
-
-Methods:
-`respondToTask`
+- Initializes base service manager components
+- Sets immutable dispute resolver address
+- Disables initializers for proxy pattern
 
 ```solidity
-function respondToTask(
-    Task calldata task,
-    bytes memory signatureData
-) external
+function initialize(
+    address initialOwner,
+    address initialRewardsInitiator,
+    IPauserRegistry pauserRegistry
+) external initializer
 ```
+- Sets up initial contract state
+- Initializes Ownable and Pausable features
+- Configures rewards initiator and pauser registry
 
-Submits signed responses from multiple operators for a task. The signatures are verified using ECDSA and responses are stored for each operator. Each task ID is generated deterministically from task parameters using keccak256. It uses `ECDSAStakeRegistry::isValidSignature` to verify the combined signatures.
-
-Effects:
-- Verifies task ID is correctly generated from task parameters
-- Verifies quorum of operator signatures using ECDSAStakeRegistry
-- Stores response for each signing operator with current block number
-- Emits TaskResponded event with task ID, task data and confirmer address
-
-Requirements:
-- Caller must be a task response confirmer
-- Task response confirmer will ensure that the task was not already responded to
-- Contract must not be paused
-- Task ID must match hash of task parameters
-- No operator has already responded to this task (not resolved)
-- Task hash must match if already exists in storage
-- Valid operator signatures meeting quorum threshold
-- Task parameters must be valid (non-zero address, valid chain ID, etc)
-
-## Challenge Lifecycle
-
-It records the full lifecycle of challenges against operator responses.
-
-Methods:
-`handleChallengeSubmission`
+### Operator Management
 ```solidity
-function handleChallengeSubmission(
+function registerOperatorToAVS(
     address operator,
-    bytes32 taskId
-) external
+    ISignatureUtils.SignatureWithSaltAndExpiry memory operatorSignature
+) external override(ECDSAServiceManagerBase, ISpottedServiceManager)
 ```
-
-This is called by `StateDisputeResolver` when a challenge is submitted, which marks the response as challenged.
-
-`handleChallengeResolution`
-```solidity
-function handleChallengeResolution(
-    address operator,
-    bytes32 taskId,
-    bool challengeSuccessful
-) external
-```
-
-Also called by `StateDisputeResolver` when a challenge is resolved, which marks the response as resolved.
-
-Effects:
-- Marks response as challenged/resolved
-- Records challenge outcome
-- Emits ChallengeResolved event
-
-Requirements:
-- Caller must be the dispute resolver
-
-## Task Query
-The service provides methods to query task responses and history.
-
-Methods:
-- `getTaskResponse`
+- Registers new operators to the AVS
+- Requires stake registry authorization
+- Validates operator signatures
 
 ```solidity
-function getTaskResponse(
-    address operator,
-    bytes32 taskId
-) external view returns (TaskResponse memory)
+function deregisterOperatorFromAVS(
+    address operator
+) external override(ECDSAServiceManagerBase, ISpottedServiceManager)
 ```
+- Removes operators from the AVS
+- Only callable by stake registry
+- Cleans up operator state
 
-Returns an operator's full response data for a specific task ID.
+### Task Management
+```solidity
+function generateTaskId(
+    address user,
+    uint32 chainId,
+    uint64 blockNumber,
+    uint256 key,
+    uint256 value,
+    uint256 timestamp
+) public pure returns (bytes32)
+```
+- Creates unique identifier for tasks
+- Combines multiple parameters for uniqueness
+- Used for tracking responses and challenges
 
-Returns:
-- Empty struct if no response exists (condition:responseBlock is 0)
+## Integration Points
+
+1. **With ECDSAServiceManagerBase**
+   - Inherits core operator management
+   - Extends base functionality
+   - Maintains compatibility with EigenLayer
+
+2. **With Dispute Resolution**
+   - Direct integration with dispute resolver
+   - Challenge handling capabilities
+   - State verification support
+
+3. **With Security Features**
+   - Implements Pausable functionality
+   - Upgradeable proxy pattern
+   - Access control mechanisms
+
+## Error Handling
+
+```solidity
+error SpottedServiceManager__CallerNotDisputeResolver()
+```
+- Ensures dispute resolution security
+- Restricts sensitive operations
+- Maintains system integrity

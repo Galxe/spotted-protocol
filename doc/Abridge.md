@@ -1,7 +1,8 @@
 # Abridge
 
-Adopted from Latch Team
+We use Abridge as the abstraction layer to send messages between chains. Adopted from Latch Team
 
+Below are the interfaces and implementations of Abridge.
 ## Abridge.sol
 
 ```solidity

@@ -11,6 +11,7 @@ import {IEpochManager} from "../interfaces/IEpochManager.sol";
 import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
 
 abstract contract LightStakeRegistryStorage is LightStakeRegistryEventsAndErrors {
+    
     IEpochManager internal immutable EPOCH_MANAGER;
     IRegistryStateReceiver internal immutable REGISTRY_STATE_RECEIVER;
     /// @dev The total amount of multipliers to weigh stakes

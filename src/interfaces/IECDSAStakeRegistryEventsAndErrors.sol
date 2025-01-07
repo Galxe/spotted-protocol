@@ -13,6 +13,7 @@ struct Quorum {
 }
 
 interface ECDSAStakeRegistryEventsAndErrors {
+    
     enum MessageType {
         REGISTER,
         DEREGISTER,
@@ -115,4 +116,7 @@ interface ECDSAStakeRegistryEventsAndErrors {
 
     /// @notice Thrown when the reference epoch is invalid
     error InvalidReferenceEpoch();
+
+    /// @notice Thrown when the reference epoch is invalid
+    error InvalidEpoch();
 }

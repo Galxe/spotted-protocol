@@ -10,14 +10,27 @@ Spotted is an AVS (Actively Validated Service) built on EigenLayer that enables 
 1. **ECDSA Signature Verification**
 - Uses ECDSA signatures for task responses
 - Minimizes gas costs compared to BLS
+- operators sign state proofs and give users ECDSA signatures allow users to verify state proofs on any chain. Example data structure to sign:
+  
+```solidity
+struct StateProof {
+  uint32 chainId;
+  address user;
+  uint256 key;
+  uint256 value;
+  uint64 blockNumber;
+  uint48 timestamp;
+  uint32 epochNumber;
+}
+```
 
 1. **Cross-Chain State Verification**
-- Verifies state claims across different chains
+- Every chain will deploy a stake registry with operatos states and is EIP1271 which implement function `isValidSignature` to verify state proofs.
 - Challenge-based dispute resolution system
 - Bridge protocol integration for state proof verification (challenge)
 
-2. cheap
-3. optimistic
+1. cheap
+2. optimistic
 ## Architecture Overview
 
 ### Core Components

@@ -28,7 +28,4 @@ interface IRemoteChainVerifier {
 
     // External functions
     function verifyState(address user, uint256 key, uint256 blockNumber) external payable;
-    function withdraw(
-        address to
-    ) external;
 }

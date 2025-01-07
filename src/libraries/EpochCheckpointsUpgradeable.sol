@@ -9,11 +9,10 @@ import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
 /// Library for tracking value changes by epoch number for cross-chain compatibility
 library EpochCheckpointsUpgradeable {
-    // 错误定义
+
     error InvalidEpoch();
 
-    // 定义EPOCH_MANAGER为public constant
-    address public constant EPOCH_MANAGER = 0x0000000000000000000000000000000000000000; // 需要替换为实际地址
+    address public constant EPOCH_MANAGER = 0x0000000000000000000000000000000000000000; // dummy address
 
     struct Checkpoint {
         uint32 _epochNumber;
@@ -63,7 +62,6 @@ library EpochCheckpointsUpgradeable {
         uint256 pos = self._checkpoints.length;
         uint256 old = latest(self);
 
-        // 使用constant EPOCH_MANAGER
         uint32 currentEpoch = uint32(IEpochManager(EPOCH_MANAGER).getCurrentEpoch());
 
         if (pos > 0 && self._checkpoints[pos - 1]._epochNumber == currentEpoch) {

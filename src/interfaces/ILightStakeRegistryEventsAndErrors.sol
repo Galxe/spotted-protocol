@@ -13,6 +13,8 @@ struct Quorum {
 }
 
 interface LightStakeRegistryEventsAndErrors {
+
+    /// @notice The type of message that can be processed by the registry
     enum MessageType {
         REGISTER,
         DEREGISTER,
@@ -117,4 +119,13 @@ interface LightStakeRegistryEventsAndErrors {
 
     /// @notice Thrown when the reference epoch is invalid
     error InvalidReferenceEpoch();
+
+    /// @notice Thrown when the sender is not the state receiver
+    error InvalidSender();
+
+    /// @notice Thrown when the epoch is invalid
+    error InvalidEpoch();
+
+    /// @notice Thrown when the message type is invalid
+    error InvalidMessageType();
 }

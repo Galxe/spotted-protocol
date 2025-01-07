@@ -5,19 +5,31 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "../interfaces/IStateManager.sol";
 
+/// @title State Manager
+/// @author Spotted Team
+/// @notice Manages state history and value tracking for users
+/// @dev Implements value storage with historical tracking by block number and timestamp
 contract StateManager is IStateManager {
-    // constants
-    uint256 private constant MAX_BATCH_SIZE = 100; // maximum batch size per transaction
+    /// @notice Maximum number of values that can be set in a single batch transaction
+    /// @dev Prevents excessive gas consumption in batch operations
+    uint256 private constant MAX_BATCH_SIZE = 100;
 
-    // current value storage: user -> key -> value
+    /// @notice Current values stored per user and key
+    /// @dev Maps user address to key to current value, 0 means non-existent
     mapping(address user => mapping(uint256 key => uint256 value)) private currentValues;
 
-    // history storage grouped by key: user -> key -> history[]
+    /// @notice Historical values stored per user and key
+    /// @dev Maps user address to key to array of historical values
     mapping(address user => mapping(uint256 key => History[])) private histories;
 
-    // keys used by user
+    /// @notice Keys used by each user
+    /// @dev Maps user address to array of keys they've used
     mapping(address user => uint256[]) private userKeys;
 
+    /// @notice Sets a value for a specific key
+    /// @param key The key to set the value for
+    /// @param value The value to set
+    /// @dev Records history and emits HistoryCommitted event
     function setValue(uint256 key, uint256 value) external {
         // in state manager, 0 is semantically non-existent
         bool exists = currentValues[msg.sender][key] != 0;
@@ -44,6 +56,9 @@ contract StateManager is IStateManager {
         emit HistoryCommitted(msg.sender, key, value, block.timestamp, block.number);
     }
 
+    /// @notice Sets multiple values in a single transaction
+    /// @param params Array of key-value pairs to set
+    /// @dev Enforces MAX_BATCH_SIZE limit
     function batchSetValues(
         SetValueParams[] calldata params
     ) external {
@@ -79,17 +94,29 @@ contract StateManager is IStateManager {
         }
     }
 
+    /// @notice Gets the current value for a user's key
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @return The current value for the key
     function getCurrentValue(address user, uint256 key) external view returns (uint256) {
         return currentValues[user][key];
     }
 
+    /// @notice Gets all keys used by a user
+    /// @param user The user address to query
+    /// @return Array of keys used by the user
     function getUsedKeys(
         address user
     ) external view returns (uint256[] memory) {
         return userKeys[user];
     }
 
-    // common binary search function
+    /// @notice Internal binary search function
+    /// @param history Array of historical values to search
+    /// @param target Target value to search for
+    /// @param searchType Type of search (block number or timestamp)
+    /// @return Index of the found position
+    /// @dev Returns the last position less than or equal to target
     function _binarySearch(
         History[] storage history,
         uint256 target,
@@ -119,7 +146,12 @@ contract StateManager is IStateManager {
         return high == 0 ? 0 : high - 1;
     }
 
-    // optimized getHistoryBetween using common binary search
+    /// @notice Gets history between specified block numbers
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param fromBlock Start block number
+    /// @param toBlock End block number
+    /// @return Array of historical values
     function getHistoryBetweenBlockNumbers(
         address user,
         uint256 key,
@@ -166,6 +198,12 @@ contract StateManager is IStateManager {
         return result;
     }
 
+    /// @notice Gets history between specified timestamps
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param fromTimestamp Start timestamp
+    /// @param toTimestamp End timestamp
+    /// @return Array of historical values within the timestamp range
     function getHistoryBetweenTimestamps(
         address user,
         uint256 key,
@@ -213,6 +251,11 @@ contract StateManager is IStateManager {
         return result;
     }
 
+    /// @notice Gets history before a specified block number
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param blockNumber The block number to query before
+    /// @return Array of historical values before the specified block
     function getHistoryBeforeBlockNumber(
         address user,
         uint256 key,
@@ -240,6 +283,11 @@ contract StateManager is IStateManager {
         return result;
     }
 
+    /// @notice Gets history after a specified block number
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param blockNumber The block number to query after
+    /// @return Array of historical values after the specified block
     function getHistoryAfterBlockNumber(
         address user,
         uint256 key,
@@ -270,6 +318,11 @@ contract StateManager is IStateManager {
         return result;
     }
 
+    /// @notice Gets history before a specified timestamp
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param timestamp The timestamp to query before
+    /// @return Array of historical values before the specified timestamp
     function getHistoryBeforeTimestamp(
         address user,
         uint256 key,
@@ -297,6 +350,11 @@ contract StateManager is IStateManager {
         return result;
     }
 
+    /// @notice Gets history after a specified timestamp
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param timestamp The timestamp to query after
+    /// @return Array of historical values after the specified timestamp
     function getHistoryAfterTimestamp(
         address user,
         uint256 key,
@@ -327,6 +385,11 @@ contract StateManager is IStateManager {
         return result;
     }
 
+    /// @notice Gets history at a specific block number
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param blockNumber The specific block number to query
+    /// @return History The historical value at the specified block
     function getHistoryAtBlock(
         address user,
         uint256 key,
@@ -346,6 +409,11 @@ contract StateManager is IStateManager {
         return keyHistory[index];
     }
 
+    /// @notice Gets history at a specific timestamp
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param timestamp The specific timestamp to query
+    /// @return History The historical value at the specified timestamp
     function getHistoryAtTimestamp(
         address user,
         uint256 key,
@@ -364,10 +432,22 @@ contract StateManager is IStateManager {
         return keyHistory[index];
     }
 
-    function getHistoryCount(address user, uint256 key) external view returns (uint256) {
+    /// @notice Gets the total number of history entries for a user's key
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @return uint256 The number of historical entries
+    function getHistoryCount(
+        address user,
+        uint256 key
+    ) external view returns (uint256) {
         return histories[user][key].length;
     }
 
+    /// @notice Gets history at a specific index
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @param index The index in the history array
+    /// @return History The historical value at the specified index
     function getHistoryAt(
         address user,
         uint256 key,
@@ -380,8 +460,14 @@ contract StateManager is IStateManager {
         return keyHistory[index];
     }
 
-    // get latest N history records
-    function getLatestHistory(address user, uint256 n) external view returns (History[] memory) {
+    /// @notice Gets the latest N history records across all keys for a user
+    /// @param user The user address to query
+    /// @param n The number of latest records to return
+    /// @return History[] Array of the latest historical values
+    function getLatestHistory(
+        address user,
+        uint256 n
+    ) external view returns (History[] memory) {
         uint256[] storage keys = userKeys[user];
         if (keys.length == 0) {
             revert StateManager__NoHistoryFound();
@@ -416,7 +502,10 @@ contract StateManager is IStateManager {
         return result;
     }
 
-    // batch get current values of multiple keys
+    /// @notice Gets current values for multiple keys
+    /// @param user The user address to query
+    /// @param keys Array of keys to query
+    /// @return values Array of current values corresponding to the keys
     function getCurrentValues(
         address user,
         uint256[] calldata keys
@@ -426,5 +515,16 @@ contract StateManager is IStateManager {
             values[i] = currentValues[user][keys[i]];
         }
         return values;
+    }
+
+    /// @notice Gets all history for a user's key
+    /// @param user The user address to query
+    /// @param key The key to query
+    /// @return Array of all historical values
+    function getHistory(
+        address user,
+        uint256 key
+    ) external view returns (History[] memory) {
+        return histories[user][key];
     }
 }

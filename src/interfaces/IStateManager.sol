@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 interface IStateManager {
-    // custom errors
+    // Errors
     error StateManager__ImmutableStateCannotBeModified();
     error StateManager__ValueNotMonotonicIncreasing();
     error StateManager__ValueNotMonotonicDecreasing();
@@ -16,7 +16,7 @@ interface IStateManager {
     error StateManager__NoHistoryFound();
     error StateManager__BatchTooLarge();
 
-    // search type for binary search
+    // Search type for binary search
     enum SearchType {
         BLOCK_NUMBER,
         TIMESTAMP

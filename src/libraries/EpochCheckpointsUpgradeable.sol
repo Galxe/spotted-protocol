@@ -7,7 +7,7 @@ import {SafeCastUpgradeable} from
     "@openzeppelin-upgrades/contracts/utils/math/SafeCastUpgradeable.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
-/// Library for tracking value changes by epoch number for cross-chain compatibility
+/// Library for tracking value changes by epoch number for cross-chain compatibility (mainnet)
 library EpochCheckpointsUpgradeable {
 
     error InvalidEpoch();

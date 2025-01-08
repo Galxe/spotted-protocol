@@ -7,7 +7,7 @@ import {SafeCastUpgradeable} from
     "@openzeppelin-upgrades/contracts/utils/math/SafeCastUpgradeable.sol";
 import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
 
-/// Library for tracking value changes by epoch number for cross-chain compatibility
+/// Library for tracking value changes by epoch number for cross-chain compatibility (other supported chains)
 library LightEpochCheckpointsUpgradeable {
     error InvalidEpoch();
 

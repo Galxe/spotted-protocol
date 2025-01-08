@@ -13,28 +13,32 @@
 
 ## Important Definitions
 
+- _State_: A struct containing:
+```solidity
+struct State {
+    address user;        // user address
+    uint32 chainId;      // chain ID where state exists
+    uint64 blockNumber;  // block number of the state
+    uint48 timestamp;    // timestamp of the state
+    uint256 key;        // state key
+    uint256 value;      // state value
+}
+```
+
 - _Challenge_: A struct containing:
 ```solidity
 struct Challenge {
     address challenger;    // address that submitted the challenge
-    uint256 deadline;     // block number when challenge expires
+    uint64 deadline;      // block number when challenge expires
     bool resolved;        // whether challenge has been resolved
-    uint256 claimedState; // state claimed by operator
-    uint256 actualState;  // actual state verified on source chain
-    bool verified;        // whether the state has been verified
-}
-```
-
-- _OperatorState_: A struct containing:
-```solidity
-struct OperatorState {
-    bool isRegistered;  // whether operator is registered
-    bool isSlashed;     // whether operator has been slashed
-    uint256 stake;      // amount staked by operator
+    State state;          // state being challenged
+    address[] operators;  // operators who signed the invalid state
+    uint256 actualState; // actual state verified on source chain
 }
 ```
 
 - _Constants_:
+  - UNVERIFIED: type(uint256).max (sentinel value for unverified states)
   - CHALLENGE_WINDOW: 7200 blocks (24 hours)
   - CHALLENGE_BOND: 1 ETH
   - CHALLENGE_PERIOD: 7200 blocks (24 hours)
@@ -69,7 +73,7 @@ Requirements:
 - Sufficient challenge bond (1 ETH)
 - Operator must be registered
 - Challenge not already submitted
-- Valid task ID
+- Valid challenge ID
 
 ### Challenge Resolution
 ```solidity
@@ -170,9 +174,35 @@ function currentOperatorSetId() external view returns (uint32)
 function getStateManager(uint256 chainId) external view returns (address)
 ```
 
+## Why AVS as Challenger?
+
+### 1. Signature Completeness
+```solidity
+function submitChallenge(
+    address[] calldata operators,
+    bytes[] calldata signatures
+) external payable onlyAVS {
+    // AVS has complete access to all operator signatures
+    // Can ensure all relevant signatures are included
+}
+```
+
+### 2. Security Guarantees
+
+1. **Signature Completeness**
+   - AVS as service coordinator has access to all operator signatures
+   - Ensures submission of complete signature sets without omission
+   - Prevents unfair punishment due to selective submission
+
+2. **Incentive Alignment**
+   - AVS's primary goal is maintaining service quality and security
+   - Punishing malicious behavior aligns with AVS interests
+   - No incentive to submit incorrect or incomplete challenges
+
+3. **Prevention of Abuse**
+   - Operators cannot submit challenges directly, preventing malicious reports
+   - Malicious users cannot exploit incomplete signature sets
+   - Reduces invalid or malicious challenges
 
 
-// 由avs 提交 challenge 
-1. avs 没有operators的签名无法slash
-2. operators或者malicious user不能提交错误或者遗漏的signature
-3. avs 倾向惩罚所有作恶者维护服务 所以不会提交错误或遗漏的signature
+

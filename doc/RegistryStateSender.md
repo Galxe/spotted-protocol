@@ -4,107 +4,120 @@
 | -------- | -------- | -------- |
 | `RegistryStateSender.sol` | Singleton(mainnet) | No proxy |
 
-`RegistryStateSender` is responsible for synchronizing operator state from the stake registry to other chains through Abridge. It enables cross-chain operator set management by collecting and transmitting operator data including weights and signing keys.
+`RegistryStateSender` manages cross-chain state synchronization for the stake registry. It handles sending state updates to other chains through bridges, enabling multi-chain operator set management.
 
-## High-level Concepts
+## Core Components
 
-1. Cross-chain operator state synchronization
-2. Fee management for bridge transactions
-3. Operator data collection and encoding
-
-## Important Definitions
-
-- _Constants_:
-  - EXECUTE_GAS_LIMIT: 500,000 gas (for cross-chain message execution)
-
-- _State Variables_:
+### Bridge Configuration
 ```solidity
-IECDSAStakeRegistry public immutable stakeRegistry;  // Source of operator data
-IAbridge public immutable abridge;                   // Abridge interface
-address public immutable receiver;                   // Destination contract(RegistryStateReceiver)
+struct BridgeInfo {
+    address bridge;    // Bridge contract address
+    address receiver;  // Receiver contract on target chain
+}
+
+mapping(uint256 => BridgeInfo) public chainToBridgeInfo;  // Chain ID to bridge info
+uint256[] public supportedChainIds;                       // List of supported chains
 ```
 
-## Core Functions
-
-### Operator State Synchronization
+### Constants
 ```solidity
-function syncAllOperators() external payable
+uint128 public constant EXECUTE_GAS_LIMIT = 500_000;  // Cross-chain execution gas limit
+address public immutable epochManager;                 // Epoch manager reference
 ```
 
-Collects and transmits all operator data to the destination chain through Abridge.
+## Key Features
 
-Effects:
-- Collects operator addresses, weights, and signing keys
-- Encodes data for cross-chain transmission
-- Sends data through bridge with provided fee
-- Emits bridge-specific events
+### Bridge Management
 
-Requirements:
-- Sufficient ETH provided to cover bridge fee
-- Bridge must be operational
-
-### Operator Data Collection
+**Bridge Configuration**
 ```solidity
-function getAllOperatorsData() public view returns (
-    address[] memory operators,
-    uint256[] memory weights,
-    address[] memory signingKeys
-)
+function addBridge(
+    uint256 _chainId,
+    address _bridge,
+    address _receiver
+) external onlyOwner
 ```
+- Adds new bridge configuration for a chain
+- Validates bridge and receiver addresses
+- Prevents duplicate bridge configurations
+- Maintains list of supported chains
 
-Collects current operator data from the `ECDSAStakeRegistry`.
-
-Returns:
-- Arrays of operator addresses, weights, and signing keys
-- Arrays are dynamically sized to actual operator count
-
-Effects:
-- Queries stake registry for operator data
-- Filters for registered operators only
-- Optimizes array sizes using assembly
-
-### Fee Management
-
-#### receive
+**Bridge Modification**
 ```solidity
-receive() external payable
+function modifyBridge(
+    uint256 _chainId,
+    address _newBridge,
+    address _newReceiver
+) external onlyOwner
 ```
-Allows contract to receive ETH for bridge fees
+- Updates existing bridge configuration
+- Validates new addresses
+- Emits modification event
 
-#### withdraw
+### State Synchronization
+
+**Batch Updates**
 ```solidity
-function withdraw(address to) external onlyOwner
+function sendBatchUpdates(
+    uint256 epoch,
+    uint256 chainId,
+    IEpochManager.StateUpdate[] memory updates
+) external payable onlyEpochManager
 ```
+- Sends state updates to target chain
+- Handles bridge fee estimation and payment
+- Ensures sufficient fee provided
+- Only callable by epoch manager
 
-Withdraws accumulated bridge fees to specified address.
+### Administrative Functions
 
-Effects:
-- Transfers entire contract balance
-- Emits FundsWithdrawn event
+**Bridge Removal**
+```solidity
+function removeBridge(uint256 _chainId) external onlyOwner
+```
+- Removes bridge configuration
+- Updates supported chain list
+- Validates chain support
 
-Requirements:
-- Only owner can call
-- Transfer must succeed
+### View Functions
 
-## Integration with External Systems
+**Bridge Information**
+```solidity
+function getBridgeInfoByChainId(uint256 chainId) external view returns (BridgeInfo memory)
+function getSupportedChainIds() external view returns (uint256[] memory)
+```
+- Query bridge configurations
+- Access supported chain list
+
+## Integration Points
 
 The contract integrates with:
-- EigenLayer's ECDSAStakeRegistry for operator data
-- Abridge for cross-chain message passing
-- Destination chain receiver contract
+1. **EpochManager**: Controls state update timing
+2. **Bridge Contracts**: Handles cross-chain messaging
+3. **Receiver Contracts**: Processes updates on target chains
 
-## View Functions
+## Security Features
 
-Query functions for contract state:
+1. **Access Control**
+   - Owner-only bridge management
+   - EpochManager-only update submission
+   - Validated bridge configurations
+
+2. **Fee Management**
+   - Automatic fee estimation
+   - Fee validation before sending
+   - Protection against insufficient fees
+
+3. **State Validation**
+   - Bridge address validation
+   - Chain support verification
+   - Duplicate prevention
+
+## Events
+
 ```solidity
-function getAllOperatorsData() external view returns (
-    address[] memory,
-    uint256[] memory,
-    address[] memory
-)
+event BridgeAdded(uint256 indexed chainId, address bridge, address receiver)
+event BridgeRemoved(uint256 indexed chainId)
+event BridgeModified(uint256 indexed chainId, address newBridge, address newReceiver)
+event UpdatesSent(uint256 indexed chainId, uint256 epoch, uint256 updateCount)
 ```
-
-Returns current operator set data including:
-- Operator addresses
-- Operator weights
-- Signing keys

@@ -5,7 +5,7 @@ import "../interfaces/IAllocationManager.sol";
 import "../interfaces/IStrategy.sol";
 
 interface IStateDisputeResolver {
-    // Custom errors
+    // Errors
     error StateDisputeResolver__InsufficientBond();
     error StateDisputeResolver__InvalidSignaturesLength();
     error StateDisputeResolver__InvalidSignature();
@@ -20,7 +20,7 @@ interface IStateDisputeResolver {
     error StateDisputeResolver__CallerNotServiceManager();
     error StateDisputeResolver__CallerNotMainChainVerifier();
     error StateDisputeResolver__ChallengeAlreadyResolved();
-    error StateDisputeResolver__ChallengePeriodActive();
+    error StateDisputeResolver__ChallengePeriodClosed();
 
     struct State {
         address user;
@@ -33,12 +33,11 @@ interface IStateDisputeResolver {
 
     struct Challenge {
         address challenger;
-        uint256 deadline;
+        uint64 deadline;
         bool resolved;
         State state;
         address[] operators;
         uint256 actualState;
-        bool verified;
     }
 
     // Events
@@ -89,8 +88,5 @@ interface IStateDisputeResolver {
     function getChallenge(
         bytes32 challengeId
     ) external view returns (Challenge memory);
-    function currentOperatorSetId() external view returns (uint32);
-    function slashableStrategies(
-        uint256 index
-    ) external view returns (IStrategy);
+
 }

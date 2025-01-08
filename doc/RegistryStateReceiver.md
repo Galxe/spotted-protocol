@@ -2,41 +2,33 @@
 
 | File | Type | Proxy |
 | -------- | -------- | -------- |
-| `RegistryStateReceiver.sol` | Singleton(on support chains) | No proxy |
+| `RegistryStateReceiver.sol` | Singleton(other support chains) | No proxy |
 
-`RegistryStateReceiver` is responsible for receiving and processing operator state updates from the mainnet through Abridge. It maintains the synchronized operator state including weights and signing keys on the destination chain.
+`RegistryStateReceiver` is responsible for receiving and processing operator state updates from the mainnet through Abridge. It maintains the synchronized operator state by forwarding updates to the LightStakeRegistry on the destination chain.
 
-## High-level Concepts
+## Core Components
 
-1. Cross-chain operator state reception
-2. Operator state management
-3. Bridge message handling
-4. Route access control
-
-## Important Definitions
-
-- _State Variables_:
+### State Variables
 ```solidity
-IAbridge public immutable abridge;                               // Bridge interface
-address public immutable sender;                                 // Authorized sender address
-mapping(address => uint256) public operatorWeights;             // Operator weight tracking
-mapping(address => address) public operatorSigningKeys;         // Operator signing key tracking
+IAbridge public immutable abridge;                   // Bridge interface
+address public immutable sender;                     // Authorized sender address
+ILightStakeRegistry public immutable stakeRegistry;  // Stake registry reference
+uint256 private currentEpoch;                        // Current epoch number
 ```
 
-- _Custom Errors_:
+### Access Control
 ```solidity
-error InvalidSender();       // Message not from authorized sender
-error UpdateRouteFailed();   // Bridge route update failed
+modifier onlyAbridge() {
+    if (msg.sender != address(abridge)) revert RegistryStateReceiver__InvalidSender();
+    _;
+}
+
+modifier onlyOwner() {
+    // OpenZeppelin Ownable implementation
+}
 ```
 
-## Access Control
-
-The contract implements dual-layer access control:
-- _Owner_: Can update bridge route settings
-- _Sender_: Only sender on mainnet can submit state updates
-- _Bridge Contract_: Must be the caller of handleMessage
-
-## Core Functions
+## Key Features
 
 ### Message Handling
 ```solidity
@@ -44,80 +36,75 @@ function handleMessage(
     address from,
     bytes calldata message,
     bytes32 /*guid*/
-) external returns (bytes4)
+) external onlyAbridge returns (bytes4)
 ```
-
-Processes operator state updates received through the bridge.
-
-Effects:
-- Decodes operator data from message
-- Updates operator weights and signing keys
-- Emits OperatorStateUpdated events for each operator
-
-Requirements:
-- Must be called by bridge contract
-- Message must be from sender on mainnet
-- Message must contain valid operator data
+- Processes state updates received through the bridge
+- Validates sender authorization
+- Decodes epoch and update data
+- Updates current epoch
+- Forwards updates to stake registry
+- Returns success selector
 
 ### Route Management
 ```solidity
 function updateRoute(bool allowed) external onlyOwner
 ```
-
-Updates the bridge route settings for the sender on mainnet.
-
-Effects:
-- Enables or disables message reception from sender
-- Updates bridge configuration
-
-Requirements:
-- Only owner can call
-- Bridge must successfully update route
+- Updates bridge route settings for sender
+- Controls message reception authorization
+- Only callable by owner
 
 ### State Queries
 ```solidity
-function getOperatorState(
-    address operator
-) external view returns (uint256 weight, address signingKey)
+function getCurrentEpoch() external view returns (uint256)
 ```
+- Returns current epoch number
+- Used for synchronization verification
 
-Retrieves complete state for a specific operator.
-
-Returns:
-- operator's current weight
-- operator's current signing key
-
-## Integration with External Systems
+## Integration Points
 
 The contract integrates with:
-- Abridge for cross-chain message reception
-- RegistryStateSender on mainnet
-- Local systems consuming operator state data
+1. **Abridge**: For cross-chain message reception
+2. **LightStakeRegistry**: For processing state updates
+3. **RegistryStateSender**: Source of state updates on mainnet
 
-Key interactions:
-- Receives encoded operator data through bridge
-- Maintains synchronized operator state
-- Provides query interface for local systems
+## Security Features
 
-## View Functions
+1. **Access Control**
+   - Bridge-only message handling
+   - Owner-only route management
+   - Sender validation
 
-Query functions for contract state:
+2. **Message Validation**
+   - Source address verification
+   - Message format validation
+   - Update processing verification
+
+3. **Error Handling**
+   - Explicit revert conditions
+   - Update failure detection
+   - Clear error messages
+
+## Error Cases
 ```solidity
-function getOperatorState(address operator) external view returns (
-    uint256 weight,
-    address signingKey
+error RegistryStateReceiver__InvalidSender()
+error RegistryStateReceiver__BatchUpdateFailed()
+```
+
+## Events
+```solidity
+event UpdateProcessed(uint256 epoch, uint256 updateCount)
+```
+
+## Constructor Configuration
+```solidity
+constructor(
+    address _abridge,
+    address _sender,
+    address _stakeRegistry,
+    address _owner
 )
 ```
-
-Returns operator's current state including:
-- Current weight
-- Current signing key
-
-```solidity
-function operatorWeights(address operator) external view returns (uint256)
-function operatorSigningKeys(address operator) external view returns (address)
-```
-
-Individual state queries for:
-- Operator's current weight
-- Operator's current signing key
+- Initializes contract with required addresses
+- Sets up initial bridge routing
+- Establishes ownership
+- Validates configuration parameters

@@ -11,14 +11,17 @@ interface IRemoteChainVerifier {
     error RemoteChainVerifier__InvalidMainChainId();
     error RemoteChainVerifier__StateNotFound();
     error RemoteChainVerifier__InsufficientFee();
-    error RemoteChainVerifier__WithdrawFailed();
-    // Events
+    error RemoteChainVerifier__BlockNumberTooHigh();
 
+    // Events
     event StateManagerUpdated(address indexed newStateManager);
     event VerificationProcessed(
         address indexed user, uint256 indexed key, uint256 blockNumber, uint256 value
     );
     event FundsWithdrawn(address indexed to, uint256 amount);
+
+    // External functions
+    function verifyState(address user, uint256 key, uint256 blockNumber) external payable;
 
     // View functions
     function abridge() external view returns (IAbridge);
@@ -26,6 +29,4 @@ interface IRemoteChainVerifier {
     function mainChainId() external view returns (uint256);
     function mainChainVerifier() external view returns (address);
 
-    // External functions
-    function verifyState(address user, uint256 key, uint256 blockNumber) external payable;
 }

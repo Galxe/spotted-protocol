@@ -9,12 +9,14 @@ interface IRegistryStateSender {
         address receiver;
     }
 
+    // Errors
     error RegistryStateSender__InsufficientFee();
     error RegistryStateSender__InvalidBridgeInfo();
     error RegistryStateSender__BridgeAlreadyExists();
     error RegistryStateSender__ChainNotSupported();
     error RegistryStateSender__InvalidSender();
 
+    // Events
     event BridgeModified(uint256 indexed chainId, address newBridge, address newReceiver);
 
     function getBridgeInfoByChainId(

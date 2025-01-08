@@ -21,11 +21,13 @@ interface IRegistryStateReceiver is IAbridgeMessageHandler {
         UPDATE_OPERATOR_WEIGHT
     }
 
+    // Errors
     error RegistryStateReceiver__InvalidSender();
     error RegistryStateReceiver__UpdateRouteFailed();
     error RegistryStateReceiver__InvalidMessageType();
     error RegistryStateReceiver__BatchUpdateFailed();
 
+    // Events
     event UpdateProcessed(uint256 indexed epoch, uint256 updatesCount);
 
     function getCurrentEpoch() external view returns (uint256);

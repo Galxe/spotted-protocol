@@ -7,26 +7,14 @@ import {
 } from "../avs/ECDSAStakeRegistryStorage.sol";
 
 interface IECDSAStakeRegistry {
-    enum MessageType {
-        REGISTER,
-        DEREGISTER,
-        UPDATE_SIGNING_KEY,
-        UPDATE_OPERATORS,
-        UPDATE_QUORUM,
-        UPDATE_MIN_WEIGHT,
-        UPDATE_THRESHOLD,
-        UPDATE_OPERATORS_QUORUM,
-        BATCH_UPDATE,
-        REGISTER_WITH_WEIGHT,
-        UPDATE_OPERATOR_WEIGHT
-    }
 
-    /**
-     * @notice Emitted when an operator is registered
-     * @param operator The address of the registered operator
-     * @param serviceManager The address of the service manager
-     */
-    event OperatorRegistered(address indexed operator, address indexed serviceManager);
+    event OperatorRegistered(
+        address indexed _operator,
+        uint256 indexed blockNumber,
+        address indexed _signingKey,
+        uint256 timestamp,
+        address _avs
+    );
 
     /**
      * @notice Emitted when an operator is deregistered
@@ -38,12 +26,11 @@ interface IECDSAStakeRegistry {
     /**
      * @notice Emitted when an operator's signing key is updated
      * @param operator The address of the operator
-     * @param blockNumber The block number when the update occurred
      * @param newSigningKey The new signing key
      * @param oldSigningKey The old signing key
      */
     event SigningKeyUpdate(
-        address indexed operator, uint256 blockNumber, address newSigningKey, address oldSigningKey
+        address indexed operator, address newSigningKey, address oldSigningKey
     );
 
     /**
@@ -83,7 +70,6 @@ interface IECDSAStakeRegistry {
 
     // Write Functions
     function initialize(
-        address _serviceManager,
         uint256 _thresholdWeight,
         Quorum memory _quorum
     ) external;
@@ -125,34 +111,34 @@ interface IECDSAStakeRegistry {
         address _operator
     ) external view returns (address);
 
-    function getOperatorSigningKeyAtBlock(
+    function getOperatorSigningKeyAtEpoch(
         address _operator,
-        uint256 _blockNumber
+        uint32 _epochNumber
     ) external view returns (address);
 
     function operatorRegistered(
         address operator
     ) external view returns (bool);
 
-    function getOperatorWeight(
-        address operator
-    ) external view returns (uint256);
-
-    function getOperatorWeightAtBlock(
+    function getOperatorWeightAtEpoch(
         address operator,
-        uint32 blockNumber
+        uint32 epochNumber
     ) external view returns (uint256);
 
     function getLastCheckpointOperatorWeight(
         address operator
     ) external view returns (uint256);
 
-    function getLastCheckpointTotalWeightAtBlock(
-        uint32 blockNumber
+    function getLastCheckpointTotalWeight() external view returns (uint256);
+
+    function getLastCheckpointThresholdWeight() external view returns (uint256);
+
+    function getTotalWeightAtEpoch(
+        uint32 _epochNumber
     ) external view returns (uint256);
 
-    function getLastCheckpointThresholdWeightAtBlock(
-        uint32 blockNumber
+    function getThresholdWeightAtEpoch(
+        uint32 _epochNumber
     ) external view returns (uint256);
 
     function isValidSignature(

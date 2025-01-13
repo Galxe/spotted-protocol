@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {ISignatureUtils} from "@eigenlayer/contracts/interfaces/ISignatureUtils.sol";
 
 interface ISpottedServiceManager {
-
     function registerOperatorToAVS(
         address operator,
         ISignatureUtils.SignatureWithSaltAndExpiry memory operatorSignature

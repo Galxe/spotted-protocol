@@ -88,5 +88,4 @@ interface IStateDisputeResolver {
     function getChallenge(
         bytes32 challengeId
     ) external view returns (Challenge memory);
-
 }

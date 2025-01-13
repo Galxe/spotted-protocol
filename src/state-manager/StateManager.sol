@@ -436,10 +436,7 @@ contract StateManager is IStateManager {
     /// @param user The user address to query
     /// @param key The key to query
     /// @return uint256 The number of historical entries
-    function getHistoryCount(
-        address user,
-        uint256 key
-    ) external view returns (uint256) {
+    function getHistoryCount(address user, uint256 key) external view returns (uint256) {
         return histories[user][key].length;
     }
 
@@ -464,10 +461,7 @@ contract StateManager is IStateManager {
     /// @param user The user address to query
     /// @param n The number of latest records to return
     /// @return History[] Array of the latest historical values
-    function getLatestHistory(
-        address user,
-        uint256 n
-    ) external view returns (History[] memory) {
+    function getLatestHistory(address user, uint256 n) external view returns (History[] memory) {
         uint256[] storage keys = userKeys[user];
         if (keys.length == 0) {
             revert StateManager__NoHistoryFound();
@@ -521,10 +515,7 @@ contract StateManager is IStateManager {
     /// @param user The user address to query
     /// @param key The key to query
     /// @return Array of all historical values
-    function getHistory(
-        address user,
-        uint256 key
-    ) external view returns (History[] memory) {
+    function getHistory(address user, uint256 key) external view returns (History[] memory) {
         return histories[user][key];
     }
 }

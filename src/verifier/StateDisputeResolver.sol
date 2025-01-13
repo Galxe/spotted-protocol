@@ -169,8 +169,11 @@ contract StateDisputeResolver is
         }
 
         // Generate challenge ID
-        bytes32 challengeId =
-            keccak256(abi.encodePacked(state.user, state.chainId, state.blockNumber, state.timestamp, state.key));
+        bytes32 challengeId = keccak256(
+            abi.encodePacked(
+                state.user, state.chainId, state.blockNumber, state.timestamp, state.key
+            )
+        );
 
         if (challenges[challengeId].challenger != address(0)) {
             revert StateDisputeResolver__ChallengeAlreadyExists();
@@ -191,7 +194,9 @@ contract StateDisputeResolver is
     /// @notice Resolves a submitted challenge
     /// @param challengeId Identifier of the challenge to resolve
     /// @dev Verifies state and handles slashing if challenge is successful
-    function resolveChallenge(bytes32 challengeId) external {
+    function resolveChallenge(
+        bytes32 challengeId
+    ) external {
         Challenge storage challenge = challenges[challengeId];
         if (challenge.resolved) {
             revert StateDisputeResolver__ChallengeAlreadyResolved();
@@ -225,26 +230,29 @@ contract StateDisputeResolver is
         challenge.resolved = true;
         challenge.actualState = actualValue;
 
-
         emit ChallengeResolved(challengeId, challengeSuccessful);
     }
 
     /// @notice Updates the operator set ID
     /// @param newSetId New operator set identifier
-    function setOperatorSetId(uint32 newSetId) external onlyOwner {
+    function setOperatorSetId(
+        uint32 newSetId
+    ) external onlyOwner {
         currentOperatorSetId = newSetId;
         emit OperatorSetIdUpdated(newSetId);
     }
 
     /// @notice Sets the strategies that can be slashed
     /// @param strategies Array of strategy contracts
-    function setSlashableStrategies(IStrategy[] calldata strategies) external onlyOwner {
+    function setSlashableStrategies(
+        IStrategy[] calldata strategies
+    ) external onlyOwner {
         uint256 strategiesLength = strategies.length;
         if (strategiesLength == 0) {
             revert StateDisputeResolver__EmptyStrategiesArray();
         }
         delete slashableStrategies;
-        
+
         for (uint256 i = 0; i < strategiesLength;) {
             slashableStrategies.push(strategies[i]);
             unchecked {
@@ -256,7 +264,9 @@ contract StateDisputeResolver is
 
     /// @notice Updates the slash amount
     /// @param newAmount New slash amount in WAD format
-    function setSlashAmount(uint256 newAmount) external onlyOwner {
+    function setSlashAmount(
+        uint256 newAmount
+    ) external onlyOwner {
         if (newAmount > 1e18) {
             revert StateDisputeResolver__InvalidSlashAmount();
         }
@@ -266,7 +276,9 @@ contract StateDisputeResolver is
 
     /// @notice Sets the service manager address
     /// @param _serviceManager Address of new service manager
-    function setServiceManager(address _serviceManager) external onlyOwner {
+    function setServiceManager(
+        address _serviceManager
+    ) external onlyOwner {
         if (_serviceManager == address(0)) {
             revert StateDisputeResolver__InvalidServiceManagerAddress();
         }
@@ -276,7 +288,9 @@ contract StateDisputeResolver is
 
     /// @notice Sets the main chain verifier address
     /// @param _verifier Address of new main chain verifier
-    function setMainChainVerifier(address _verifier) external onlyOwner {
+    function setMainChainVerifier(
+        address _verifier
+    ) external onlyOwner {
         if (_verifier == address(0)) {
             revert StateDisputeResolver__InvalidVerifierAddress();
         }
@@ -287,7 +301,9 @@ contract StateDisputeResolver is
     /// @notice Retrieves challenge information
     /// @param challengeId Identifier of the challenge
     /// @return Challenge Challenge data structure
-    function getChallenge(bytes32 challengeId) external view returns (Challenge memory) {
+    function getChallenge(
+        bytes32 challengeId
+    ) external view returns (Challenge memory) {
         return challenges[challengeId];
     }
 

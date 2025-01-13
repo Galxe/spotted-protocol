@@ -71,16 +71,15 @@ contract RemoteChainVerifier is IRemoteChainVerifier, Ownable {
             revert RemoteChainVerifier__BlockNumberTooHigh();
         }
 
-        IStateManager.History memory history = stateManager.getHistoryAtBlock(user, key, blockNumber);
+        IStateManager.History memory history =
+            stateManager.getHistoryAtBlock(user, key, blockNumber);
 
-        bytes memory response =
-            abi.encode(mainChainId, user, key, blockNumber, history.value, true);
-            (, uint256 fee) = abridge.estimateFee(mainChainVerifier, EXECUTE_GAS_LIMIT, response);
-            if (msg.value < fee) revert RemoteChainVerifier__InsufficientFee();
+        bytes memory response = abi.encode(mainChainId, user, key, blockNumber, history.value, true);
+        (, uint256 fee) = abridge.estimateFee(mainChainVerifier, EXECUTE_GAS_LIMIT, response);
+        if (msg.value < fee) revert RemoteChainVerifier__InsufficientFee();
 
-            abridge.send{value: msg.value}(mainChainVerifier, EXECUTE_GAS_LIMIT, response);
+        abridge.send{value: msg.value}(mainChainVerifier, EXECUTE_GAS_LIMIT, response);
 
-            emit VerificationProcessed(user, key, blockNumber, history.value);
- 
+        emit VerificationProcessed(user, key, blockNumber, history.value);
     }
 }

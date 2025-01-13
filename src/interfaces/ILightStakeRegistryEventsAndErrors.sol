@@ -13,7 +13,6 @@ struct Quorum {
 }
 
 interface LightStakeRegistryEventsAndErrors {
-
     /// @notice The type of message that can be processed by the registry
     enum MessageType {
         REGISTER,

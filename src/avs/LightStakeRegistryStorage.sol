@@ -11,8 +11,6 @@ import {IEpochManager} from "../interfaces/IEpochManager.sol";
 import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
 
 abstract contract LightStakeRegistryStorage is LightStakeRegistryEventsAndErrors {
-    
-    IEpochManager internal immutable EPOCH_MANAGER;
     IRegistryStateReceiver internal immutable REGISTRY_STATE_RECEIVER;
     /// @dev The total amount of multipliers to weigh stakes
     uint256 internal constant BPS = 10_000;
@@ -49,8 +47,7 @@ abstract contract LightStakeRegistryStorage is LightStakeRegistryEventsAndErrors
     // solhint-disable-next-line
     uint256[40] private __gap;
 
-    constructor(address _epochManager, address _registryStateReceiver) {
-        EPOCH_MANAGER = IEpochManager(_epochManager);
+    constructor(address _registryStateReceiver) {
         REGISTRY_STATE_RECEIVER = IRegistryStateReceiver(_registryStateReceiver);
     }
 }

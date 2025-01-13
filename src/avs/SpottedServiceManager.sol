@@ -2,11 +2,15 @@
 pragma solidity ^0.8.26;
 
 import {Initializable} from "@openzeppelin-upgrades/contracts/proxy/utils/Initializable.sol";
-import {ECDSAServiceManagerBase} from "@eigenlayer-middleware/src/unaudited/ECDSAServiceManagerBase.sol";
+import {ECDSAServiceManagerBase} from
+    "@eigenlayer-middleware/src/unaudited/ECDSAServiceManagerBase.sol";
 import {ECDSAStakeRegistry} from "./ECDSAStakeRegistry.sol";
-import {ECDSAUpgradeable} from "@openzeppelin-upgrades/contracts/utils/cryptography/ECDSAUpgradeable.sol";
-import {IERC1271Upgradeable} from "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin-upgrades/contracts/security/PausableUpgradeable.sol";
+import {ECDSAUpgradeable} from
+    "@openzeppelin-upgrades/contracts/utils/cryptography/ECDSAUpgradeable.sol";
+import {IERC1271Upgradeable} from
+    "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
+import {PausableUpgradeable} from
+    "@openzeppelin-upgrades/contracts/security/PausableUpgradeable.sol";
 import {IPauserRegistry} from "@eigenlayer/contracts/interfaces/IPauserRegistry.sol";
 import {ISignatureUtils} from "@eigenlayer/contracts/interfaces/ISignatureUtils.sol";
 import {IStateDisputeResolver} from "../interfaces/IStateDisputeResolver.sol";
@@ -14,7 +18,7 @@ import "../interfaces/ISpottedServiceManager.sol";
 
 /// @title SpottedServiceManager
 /// @author Spotted Team
-/// @notice Service manager for the Spotted Oracle AVS that handles operator registration 
+/// @notice Service manager for the Spotted Oracle AVS that handles operator registration
 /// @dev Inherits from ECDSAServiceManagerBase and implements ISpottedServiceManager interface
 
 contract SpottedServiceManager is
@@ -38,7 +42,7 @@ contract SpottedServiceManager is
     )
         ECDSAServiceManagerBase(_avsDirectory, _stakeRegistry, _rewardsCoordinator, _delegationManager)
     {
-        _disableInitializers();     
+        _disableInitializers();
     }
 
     /// @notice Initializes the contract with required addresses and configurations

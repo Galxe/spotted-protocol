@@ -30,9 +30,8 @@ contract LightStakeRegistry is
     using EpochCheckpointsUpgradeable for EpochCheckpointsUpgradeable.History;
 
     constructor(
-        address _epochManager,
         address _registryStateReceiver
-    ) LightStakeRegistryStorage(_epochManager, _registryStateReceiver) {
+    ) LightStakeRegistryStorage(_registryStateReceiver) {
         _disableInitializers();
     }
 
@@ -51,7 +50,6 @@ contract LightStakeRegistry is
         __LightStakeRegistry_init(_thresholdWeight, _initialQuorum);
     }
 
-
     /// @notice Processes updates for a new epoch
     /// @param epoch The new epoch number
     /// @param updates Array of state updates to process
@@ -60,9 +58,9 @@ contract LightStakeRegistry is
         uint256 epoch,
         IEpochManager.StateUpdate[] memory updates
     ) external onlyStateReceiver {
-        if (epoch < EPOCH_MANAGER.currentEpoch() + 1) revert InvalidEpoch();
+        if (epoch < REGISTRY_STATE_RECEIVER.getCurrentEpoch() + 1) revert InvalidEpoch();
         uint256 updatesLength = updates.length;
-        for (uint256 i = 0; i < updatesLength; ) {
+        for (uint256 i = 0; i < updatesLength;) {
             IEpochManager.StateUpdate memory update = updates[i];
 
             if (update.updateType == IEpochManager.MessageType.REGISTER) {
@@ -93,7 +91,7 @@ contract LightStakeRegistry is
 
     /// @notice Verifies if the provided signature data is valid for the given data hash.
     /// @param _dataHash The hash of the data that was signed.
-    /// @param _signatureData Encoded signature data consisting of an array of operators, an array of signatures, and a reference block number.
+    /// @param _signatureData Encoded signature data consisting of an array of operators, an array of signatures, and a reference epoch number.
     /// @return The function selector that indicates the signature is valid according to ERC1271 standard.
     function isValidSignature(
         bytes32 _dataHash,
@@ -101,8 +99,8 @@ contract LightStakeRegistry is
     ) external view returns (bytes4) {
         (address[] memory operators, bytes[] memory signatures, uint32 referenceEpoch) =
             abi.decode(_signatureData, (address[], bytes[], uint32));
-        if (referenceEpoch > EPOCH_MANAGER.currentEpoch()) {
-                revert InvalidEpoch();
+        if (referenceEpoch > REGISTRY_STATE_RECEIVER.getCurrentEpoch()) {
+            revert InvalidEpoch();
         }
         _checkSignatures(_dataHash, operators, signatures, referenceEpoch);
         return IERC1271Upgradeable.isValidSignature.selector;
@@ -123,15 +121,15 @@ contract LightStakeRegistry is
         return address(uint160(_operatorSigningKeyHistory[_operator].latest()));
     }
 
-    /// @notice Retrieves the latest signing key for a given operator at a specific block number.
+    /// @notice Retrieves the latest signing key for a given operator at a specific epoch number.
     /// @param _operator The address of the operator.
-    /// @param _epochNumber The epoch number to get the operator's signing key.
+    /// @param _referenceEpoch The epoch number to get the operator's signing key.
     /// @return The signing key of the operator at the given epoch.
     function getOperatorSigningKeyAtEpoch(
         address _operator,
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (address) {
-        return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_epochNumber)));
+        return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_referenceEpoch)));
     }
 
     /// @notice Retrieves the last recorded weight for a given operator.
@@ -157,31 +155,31 @@ contract LightStakeRegistry is
 
     /// @notice Retrieves the operator's weight at a specific epoch number.
     /// @param _operator The address of the operator.
-    /// @param _epochNumber The epoch number to get the operator weight for the quorum
+    /// @param _referenceEpoch The epoch number to get the operator weight for the quorum
     /// @return uint256 - The weight of the operator at the given epoch.
     function getOperatorWeightAtEpoch(
         address _operator,
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (uint256) {
-        return _operatorWeightHistory[_operator].getAtEpoch(_epochNumber);
+        return _operatorWeightHistory[_operator].getAtEpoch(_referenceEpoch);
     }
 
     /// @notice Retrieves the total weight at a specific epoch number.
-    /// @param _epochNumber The epoch number to get the total weight for the quorum
+    /// @param _referenceEpoch The epoch number to get the total weight for the quorum
     /// @return uint256 - The total weight at the given epoch.
     function getTotalWeightAtEpoch(
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (uint256) {
-        return _totalWeightHistory.getAtEpoch(_epochNumber);
+        return _totalWeightHistory.getAtEpoch(_referenceEpoch);
     }
 
-    /// @notice Retrieves the threshold weight at a specific epoch number.
-    /// @param _epochNumber The epoch number to get the threshold weight for the quorum
-    /// @return uint256 - The threshold weight the given epoch.
-    function getLastCheckpointThresholdWeightAtEpoch(
-        uint32 _epochNumber
+    /// @notice Gets the threshold weight at a specific epoch
+    /// @param _epoch The epoch number to query
+    /// @return The threshold weight at the specified epoch
+    function getThresholdWeightAtEpoch(
+        uint32 _epoch
     ) external view returns (uint256) {
-        return _thresholdWeightHistory.getAtEpoch(_epochNumber);
+        return _thresholdWeightHistory.getAtEpoch(_epoch);
     }
 
     function operatorRegistered(
@@ -430,7 +428,7 @@ contract LightStakeRegistry is
         (address[] memory operators, uint256[] memory newWeights, uint256 newTotalWeight) =
             abi.decode(data, (address[], uint256[], uint256));
         uint256 operatorsLength = operators.length;
-        
+
         for (uint256 i = 0; i < operatorsLength;) {
             _operatorWeightHistory[operators[i]].push(newWeights[i]);
             unchecked {
@@ -493,15 +491,6 @@ contract LightStakeRegistry is
     ) internal {
         uint256 thresholdWeight = abi.decode(data, (uint256));
         _thresholdWeightHistory.push(thresholdWeight);
-    }
-
-    /// @notice Gets the threshold weight at a specific epoch
-    /// @param _epoch The epoch number to query
-    /// @return The threshold weight at the specified epoch
-    function getThresholdWeightAtEpoch(
-        uint32 _epoch
-    ) external view returns (uint256) {
-        return _thresholdWeightHistory.getAtEpoch(_epoch);
     }
 
     /// @notice Handles updating operators' weights for a specific quorum

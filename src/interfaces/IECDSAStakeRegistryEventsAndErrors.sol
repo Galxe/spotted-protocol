@@ -13,7 +13,6 @@ struct Quorum {
 }
 
 interface ECDSAStakeRegistryEventsAndErrors {
-    
     enum MessageType {
         REGISTER,
         DEREGISTER,
@@ -31,12 +30,18 @@ interface ECDSAStakeRegistryEventsAndErrors {
     /// @notice Emitted when the system registers an operator
     /// @param _operator The address of the registered operator
     /// @param _avs The address of the associated AVS
-    event OperatorRegistered(address indexed _operator, address indexed _avs);
+    event OperatorRegistered(
+        address indexed _operator,
+        uint256 indexed blockNumber,
+        address indexed _signingKey,
+        uint256 timestamp,
+        address _avs
+    );
 
     /// @notice Emitted when the system deregisters an operator
     /// @param _operator The address of the deregistered operator
     /// @param _avs The address of the associated AVS
-    event OperatorDeregistered(address indexed _operator, address indexed _avs);
+    event OperatorDeregistered(address indexed _operator, uint256 indexed blockNumber, address indexed _avs);
 
     /// @notice Emitted when the system updates the quorum
     /// @param _old The previous quorum configuration

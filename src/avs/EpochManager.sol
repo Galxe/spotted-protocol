@@ -10,59 +10,55 @@ import {IRegistryStateSender} from "../interfaces/IRegistryStateSender.sol";
 /// @notice Manages epoch transitions and state updates for the AVS system
 /// @dev Handles epoch advancement, grace periods, and state synchronization
 contract EpochManager is IEpochManager, OwnableUpgradeable {
+    /// @notice Genesis block number when contract was deployed
+    /// @dev Immutable after deployment
+    uint64 public immutable GENESIS_BLOCK;
+
     /// @notice Length of each epoch in blocks (approximately 7 days)
     /// @dev Immutable after deployment
-    uint256 public immutable EPOCH_LENGTH = 45000;
+    uint64 public immutable EPOCH_LENGTH = 45000;
 
     /// @notice Grace period duration in blocks (approximately 1 day)
     /// @dev Immutable after deployment, must be less than EPOCH_LENGTH
-    uint256 public immutable GRACE_PERIOD = 6400;
+    uint64 public immutable GRACE_PERIOD = 6400;
 
     /// @notice Address of the registry state sender contract
     /// @dev Immutable after deployment
     address public immutable REGISTRY_STATE_SENDER;
 
-    /// @notice Current epoch number
-    uint256 public currentEpoch;
-
-    /// @notice Block number when the last epoch started
-    uint256 public lastEpochBlock;
-
-    /// @notice Block number when the next epoch will start
-    uint256 public nextEpochBlock;
-
-    /// @notice Last epoch that was updated
-    uint256 public lastUpdatedEpoch;
-
-    /// @notice Mapping of actual block numbers for each epoch
-    mapping(uint256 => uint256) public epochBlocks;
-
     /// @notice State updates for each epoch
-    mapping(uint256 => StateUpdate[]) internal epochUpdates;
-
-    /// @notice Number of updates for each epoch
-    mapping(uint256 => uint256) public epochUpdateCounts;
+    mapping(uint32 epochNumber => StateUpdate[] updates) internal epochUpdates;
 
     /// @notice Initializes the contract with required parameters
     /// @param _registryStateSender Address of the registry state sender contract
     constructor(address _registryStateSender) {
-        lastEpochBlock = block.number;
-        nextEpochBlock = block.number + EPOCH_LENGTH;
-        currentEpoch = 0;
+        GENESIS_BLOCK = uint64(block.number);
         REGISTRY_STATE_SENDER = _registryStateSender;
+    }
+
+    /// @notice Queues a state update
+    /// @param updateType Type of update to queue
+    /// @param data Encoded update data
+    function queueStateUpdate(MessageType updateType, bytes memory data) external {
+        uint32 targetEpoch = getEffectiveEpoch();
+        
+        epochUpdates[targetEpoch].push(StateUpdate({
+            updateType: updateType,
+            data: data
+        }));
+
+        emit StateUpdateQueued(targetEpoch, updateType, data);
     }
 
     /// @notice Sends state updates to specified chain
     /// @param chainId The ID of the target chain
     /// @dev Requires payment for cross-chain message fees
     function sendStateUpdates(uint256 chainId) external payable {
-        uint256 targetEpoch = currentEpoch;
+        uint32 targetEpoch = getCurrentEpoch() + 1;
         StateUpdate[] storage updates = epochUpdates[targetEpoch];
 
         // only process if there are updates
         if (updates.length > 0) {
-            // record update count
-            epochUpdateCounts[targetEpoch] = updates.length;
 
             // send batch updates via RegistryStateSender
             IRegistryStateSender(REGISTRY_STATE_SENDER).sendBatchUpdates{value: msg.value}(
@@ -75,56 +71,21 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
         }
     }
 
-    /// @notice Advances to the next epoch
-    /// @dev Can only be called when canAdvanceEpoch returns true
-    function advanceEpoch() external {
-        if (!canAdvanceEpoch()) revert EpochManager__EpochNotReady();
-
-        lastEpochBlock = nextEpochBlock;
-        nextEpochBlock = lastEpochBlock + EPOCH_LENGTH;
-        currentEpoch++;
-
-        emit EpochAdvanced(currentEpoch, lastEpochBlock, nextEpochBlock);
-    }
-
     /// @notice Gets remaining blocks until next epoch
-    /// @return uint256 Number of blocks until next epoch
-    function blocksUntilNextEpoch() external view returns (uint256) {
-        if (block.number >= nextEpochBlock) return 0;
-        return nextEpochBlock - block.number;
+    /// @return uint64 Number of blocks until next epoch
+    function blocksUntilNextEpoch() external view returns (uint64) {
+        if (block.number >= getNextEpochBlock()) return 0;
+        return getNextEpochBlock() - uint64(block.number);
     }
 
     /// @notice Gets remaining blocks until grace period
-    /// @return uint256 Number of blocks until grace period starts
-    function blocksUntilGracePeriod() external view returns (uint256) {
-        uint256 graceStart = nextEpochBlock - GRACE_PERIOD;
+    /// @return uint64 Number of blocks until grace period starts
+    function blocksUntilGracePeriod() external view returns (uint64) {
+        uint64 graceStart = getNextEpochBlock() - GRACE_PERIOD;
         if (block.number >= graceStart) return 0;
-        return graceStart - block.number;
+        return graceStart - uint64(block.number);
     }
 
-    /// @notice Gets effective epoch for state updates
-    /// @return uint256 The epoch number where updates will take effect
-    /// @dev Returns current epoch + 2 during grace period, current epoch + 1 otherwise
-    function getEffectiveEpoch() public view returns (uint256) {
-        if (isInGracePeriod()) {
-            return currentEpoch + 2;
-        }
-        return currentEpoch + 1;
-    }
-
-    /// @notice Queues a state update
-    /// @param updateType Type of update to queue
-    /// @param data Encoded update data
-    function queueStateUpdate(MessageType updateType, bytes memory data) external {
-        uint256 targetEpoch = getEffectiveEpoch();
-        
-        epochUpdates[targetEpoch].push(StateUpdate({
-            updateType: updateType,
-            data: data
-        }));
-
-        emit StateUpdateQueued(targetEpoch, updateType, data);
-    }
 
     /// @notice Gets epoch interval details
     /// @param epoch The epoch number to query
@@ -132,73 +93,64 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
     /// @return graceBlock Block when grace period starts
     /// @return endBlock End block of the epoch
     function getEpochInterval(
-        uint256 epoch
-    ) external view returns (uint256 startBlock, uint256 graceBlock, uint256 endBlock) {
-        if (epochBlocks[epoch] != 0) {
-            startBlock = epochBlocks[epoch];
-            endBlock = startBlock + EPOCH_LENGTH;
-            graceBlock = endBlock - GRACE_PERIOD;
-            return (startBlock, graceBlock, endBlock);
-        }
-
-        startBlock = lastEpochBlock + ((epoch - currentEpoch) * EPOCH_LENGTH);
+        uint32 epoch
+    ) external view returns (uint64 startBlock, uint64 graceBlock, uint64 endBlock) {
+        startBlock = GENESIS_BLOCK + (epoch * EPOCH_LENGTH);
         endBlock = startBlock + EPOCH_LENGTH;
         graceBlock = endBlock - GRACE_PERIOD;
+        return (startBlock, graceBlock, endBlock);
     }
 
-    /// @notice Validates period configuration
-    /// @param _epochLength Length of epoch in blocks
-    /// @param _lockPeriod Length of lock period in blocks
-    /// @param _gracePeriod Length of grace period in blocks
-    /// @dev Internal function to validate period lengths
-    function _validatePeriods(
-        uint256 _epochLength,
-        uint256 _lockPeriod,
-        uint256 _gracePeriod
-    ) internal pure {
-        if (_epochLength != _lockPeriod) revert EpochManager__InvalidPeriodLength();
-        if (_gracePeriod >= _epochLength) revert EpochManager__InvalidGracePeriod();
+    /// @notice Gets effective epoch for state updates
+    /// @return uint32 The epoch number where updates will take effect
+    /// @dev Returns current epoch + 2 during grace period, current epoch + 1 otherwise
+    function getEffectiveEpoch() public view returns (uint32) {
+        if (isInGracePeriod()) {
+            return getCurrentEpoch() + 2;
+        }
+        return getCurrentEpoch() + 1;
     }
 
-    /// @notice Reverts to previous epoch
-    /// @param epoch The epoch number to revert from
-    /// @dev Only callable by owner, must be current epoch
-    function revertEpoch(uint256 epoch) external onlyOwner {
-        if (epoch != currentEpoch) revert EpochManager__InvalidEpochRevert();
-
-        currentEpoch--;
-        nextEpochBlock = lastEpochBlock + EPOCH_LENGTH;
-        lastEpochBlock = lastEpochBlock - EPOCH_LENGTH;
-
-        emit EpochReverted(epoch);
-    }
-
-    /// @notice Checks if the epoch can be advanced
-    /// @return bool True if current block number is greater than or equal to next epoch block
-    function canAdvanceEpoch() public view returns (bool) {
-        return block.number >= nextEpochBlock;
+    /// @notice Calculates the effective epoch for a given block number, usually used to determine the epoch of a state update
+    /// @param blockNumber The block number to calculate the effective epoch for
+    /// @return uint32 The effective epoch number when changes will take effect
+    /// @dev If the block is in a grace period, returns epoch + 2, otherwise returns epoch + 1
+    function getEffectiveEpochForBlock(uint64 blockNumber) public view returns (uint32) {
+        uint64 blocksSinceGenesis = blockNumber - GENESIS_BLOCK;
+        uint32 absoluteEpoch = uint32(blocksSinceGenesis / EPOCH_LENGTH);
+        
+        uint64 epochStartBlock = GENESIS_BLOCK + (uint64(absoluteEpoch) * EPOCH_LENGTH);
+        uint64 epochEndBlock = epochStartBlock + EPOCH_LENGTH;
+        
+        bool isGracePeriod = blockNumber >= (epochEndBlock - GRACE_PERIOD);
+        
+        return absoluteEpoch + (isGracePeriod ? 2 : 1);
     }
 
     /// @notice Checks if currently in grace period
     /// @return bool True if current block is within grace period
     function isInGracePeriod() public view returns (bool) {
         uint256 currentBlock = block.number;
-        uint256 epochEndBlock = nextEpochBlock;
+        uint256 epochEndBlock = getNextEpochBlock();
         return currentBlock >= epochEndBlock - GRACE_PERIOD;
     }
 
-    /// @notice Checks if epoch can be updated
-    /// @param targetEpoch The epoch number to check
-    /// @return bool True if epoch can be updated
-    function isUpdatable(uint256 targetEpoch) public view returns (bool) {
-        return targetEpoch == getEffectiveEpoch();
-    }
-
     /// @notice Calculates current epoch based on block number
-    /// @return uint256 The current epoch number
-    function getCurrentEpoch() public view returns (uint256) {
-        return (block.number - lastEpochBlock) / EPOCH_LENGTH + currentEpoch;
+    /// @return uint32 The current epoch number
+    function getCurrentEpoch() public view returns (uint32) {
+        uint64 blocksSinceGenesis = uint64(block.number) - GENESIS_BLOCK;
+        return uint32(blocksSinceGenesis / EPOCH_LENGTH);
     }
 
+    /// @notice Gets the start block of the current epoch
+    /// @return uint64 The start block of the current epoch
+    function getCurrentEpochBlock() public view returns (uint64) {
+        return GENESIS_BLOCK + (getCurrentEpoch() * EPOCH_LENGTH);
+    }
 
+    /// @notice Gets the next epoch block
+    /// @return uint64 The next epoch block
+    function getNextEpochBlock() public view returns (uint64) {
+        return getCurrentEpochBlock() + EPOCH_LENGTH;
+    }
 }

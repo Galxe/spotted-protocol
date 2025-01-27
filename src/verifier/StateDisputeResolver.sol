@@ -1,28 +1,40 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin-upgrades/contracts/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin-v5.0.0/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {ReentrancyGuard} from "@openzeppelin-v5.0.0/contracts/utils/ReentrancyGuard.sol";
 import "../interfaces/IAllocationManager.sol";
 import "../interfaces/IStrategy.sol";
 import "../interfaces/IMainChainVerifier.sol";
 import "../interfaces/IStateDisputeResolver.sol";
 import "../interfaces/ISpottedServiceManager.sol";
-import {EIP712Upgradeable} from
-    "lib/eigenlayer-middleware/lib/eigenlayer-contracts/lib/openzeppelin-contracts-upgradeable-v4.9.0/contracts/utils/cryptography/EIP712Upgradeable.sol";
+import "../interfaces/IECDSAStakeRegistry.sol";
+import "../interfaces/IEpochManager.sol";
 
 /// @title State Dispute Resolver
 /// @author Spotted Team
 /// @notice Handles disputes over state claims and manages operator slashing
 /// @dev Implements EIP-712 for typed data signing and verification
-contract StateDisputeResolver is
-    IStateDisputeResolver,
+contract StateDisputeResolver is 
     ReentrancyGuard,
-    EIP712Upgradeable,
-    Ownable
+    EIP712,
+    Ownable,
+    IStateDisputeResolver 
 {
+    /// @notice Core protocol dependencies - all immutable for security and gas optimization
+    IEpochManager public immutable epochManager;
+    IAllocationManager public immutable allocationManager;
+    IMainChainVerifier public immutable mainChainVerifier;
+    IECDSAStakeRegistry public immutable ecdsaStakeRegistry;
+
+    enum OperatorStatus {
+        UNCHALLENGED,
+        CHALLENGED,
+        SLASHED
+    }
+    string public constant VERSION = "1.0.0";
     /// @notice Maximum value used to represent unverified state
     /// @dev Used as a sentinel value for unverified states
     uint256 public constant UNVERIFIED = type(uint256).max;
@@ -39,12 +51,6 @@ contract StateDisputeResolver is
     /// @dev Set to 24 hours worth of blocks
     uint256 public constant CHALLENGE_PERIOD = 7200;
 
-    /// @notice Reference to allocation manager contract
-    IAllocationManager public allocationManager;
-
-    /// @notice Reference to main chain verifier contract
-    IMainChainVerifier public mainChainVerifier;
-
     /// @notice Address authorized to submit challenges
     address public challengeSubmitter;
 
@@ -57,59 +63,48 @@ contract StateDisputeResolver is
     /// @notice Amount to slash from operators (in WAD format)
     uint256 public slashAmount;
 
-    /// @notice Reference to service manager contract
-    ISpottedServiceManager public serviceManager;
-
     /// @notice EIP-712 type hash for State struct
     /// @dev Used in typed data signing
     bytes32 private constant STATE_TYPEHASH = keccak256(
-        "State(address user,uint32 chainId,uint64 blockNumber,uint48 timestamp,uint256 key,uint256 value)"
+        "State(address user,uint32 chainId,uint64 blockNumber,uint256 key,uint256 value)"
     );
 
     /// @notice Mapping of active challenges
     mapping(bytes32 => Challenge) private challenges;
 
-    /// @notice Ensures caller is the service manager
-    modifier onlyServiceManager() {
-        if (msg.sender != address(serviceManager)) {
-            revert StateDisputeResolver__CallerNotServiceManager();
-        }
-        _;
-    }
+    /// @notice Mapping to track challenged operators
+    mapping(bytes32 => mapping(address => bool)) private operatorSlashed;
 
-    /// @notice Ensures caller is the main chain verifier
-    modifier onlyMainChainVerifier() {
-        if (msg.sender != address(mainChainVerifier)) {
-            revert StateDisputeResolver__CallerNotMainChainVerifier();
-        }
-        _;
-    }
+    /// @notice Mapping to track challenged operators
+    mapping(bytes32 => mapping(address => bool)) private operatorChallenged;
 
-    /// @notice Ensures caller is the challenge submitter
-    modifier onlyChallengeSubmitter() {
-        if (msg.sender != challengeSubmitter) {
-            revert StateDisputeResolver__CallerNotChallengeSubmitter();
-        }
-        _;
-    }
+    /// @notice Maximum number of signatures allowed per submission
+    uint256 public constant MAX_SIGNATURES = 50;
+
+    /// @notice Mapping of claimable amounts for each address
+    mapping(address => uint256) public claimableAmount;
 
     /// @notice Contract constructor
-    /// @dev Disables initializers for implementation contract
-    constructor() {
-        _disableInitializers();
-    }
-
-    /// @notice Initializes the contract
+    /// @dev Sets all core dependencies and initializes the contract
+    /// @param _epochManager Address of epoch manager contract
     /// @param _allocationManager Address of allocation manager contract
+    /// @param _mainChainVerifier Address of main chain verifier contract
+    /// @param _ecdsaStakeRegistry Address of ECDSA stake registry contract
     /// @param _operatorSetId Initial operator set ID
     /// @param _slashAmount Initial slash amount in WAD format
-    function initialize(
+    constructor(
+        address _epochManager,
         address _allocationManager,
+        address _mainChainVerifier,
+        address _ecdsaStakeRegistry,
         uint32 _operatorSetId,
         uint256 _slashAmount
-    ) external initializer {
-        __EIP712_init("SpottedStateResolver", "v1");
+    ) EIP712("SpottedStateResolver", VERSION) {
+        epochManager = IEpochManager(_epochManager);
         allocationManager = IAllocationManager(_allocationManager);
+        mainChainVerifier = IMainChainVerifier(_mainChainVerifier);
+        ecdsaStakeRegistry = IECDSAStakeRegistry(_ecdsaStakeRegistry);
+        
         currentOperatorSetId = _operatorSetId;
         slashAmount = _slashAmount;
     }
@@ -117,95 +112,121 @@ contract StateDisputeResolver is
     /// @notice Allows contract to receive ETH
     receive() external payable {}
 
-    /// @notice Submits a challenge for an invalid state claim
-    /// @param state The state being challenged
-    /// @param operators Array of operators who signed the state
+    /// @notice Submit challenge based on state data and signatures
+    /// @param stateData The original state data that was signed
     /// @param signatures Array of signatures from operators
-    /// @dev Requires challenge bond and verifies signatures
     function submitChallenge(
-        State calldata state,
-        address[] calldata operators,
+        State calldata stateData,
         bytes[] calldata signatures
-    ) external payable onlyChallengeSubmitter nonReentrant {
-        // check bond amount using constant
+    ) external payable nonReentrant {
         if (msg.value < CHALLENGE_BOND) {
             revert StateDisputeResolver__InsufficientBond();
         }
 
-        // Check arrays length match
-        if (operators.length != signatures.length || operators.length == 0) {
-            revert StateDisputeResolver__InvalidSignaturesLength();
+        if (signatures.length == 0) {
+            revert StateDisputeResolver__NoSignatures();
         }
 
-        // Generate EIP712 hash
+        if (signatures.length > MAX_SIGNATURES) {
+            revert StateDisputeResolver__TooManySignatures();
+        }
+
+        // Generate task ID
+        bytes32 taskId = keccak256(abi.encode(stateData));
+
+        // Get current epoch
+        uint32 currentEpoch = epochManager.getCurrentEpoch();
+
+        // Generate the hash that was signed
         bytes32 structHash = keccak256(
             abi.encode(
                 STATE_TYPEHASH,
-                state.user,
-                state.chainId,
-                state.blockNumber,
-                state.timestamp,
-                state.key,
-                state.value
+                stateData.user,
+                stateData.chainId,
+                stateData.blockNumber,
+                stateData.key,
+                stateData.value
             )
         );
         bytes32 hashData = _hashTypedDataV4(structHash);
-        uint256 signaturesLength = signatures.length;
-        // Verify each signature and check operators match
-        for (uint256 i = 0; i < signaturesLength;) {
-            address recoveredSigner = ECDSA.recover(hashData, signatures[i]);
-            if (recoveredSigner != operators[i]) {
-                revert StateDisputeResolver__InvalidSignature();
-            }
-            // Check for duplicate operators
-            for (uint256 j = 0; j < i; j++) {
-                if (operators[j] == recoveredSigner) {
-                    revert StateDisputeResolver__DuplicateOperator();
-                }
-            }
-            unchecked {
-                ++i;
-            }
+
+        // Create or get existing challenge
+        Challenge storage challenge = challenges[taskId];
+        if (challenge.challengers.length == 0) {
+            // Initialize new challenge
+            challenge.state = State({
+                user: stateData.user,
+                chainId: stateData.chainId,
+                blockNumber: stateData.blockNumber,
+                key: stateData.key,
+                value: stateData.value
+            });
         }
 
-        // Generate challenge ID
-        bytes32 challengeId = keccak256(
-            abi.encodePacked(
-                state.user, state.chainId, state.blockNumber, state.timestamp, state.key
-            )
-        );
+        // Verify each signature and process operators
+        for (uint256 i = 0; i < signatures.length;) {
+            address signingKey = ECDSA.recover(hashData, signatures[i]);
+            address operator = ecdsaStakeRegistry.getOperatorBySigningKey(signingKey);
 
-        if (challenges[challengeId].challenger != address(0)) {
-            revert StateDisputeResolver__ChallengeAlreadyExists();
+            // Check operator status
+            uint256 currentWeight = ecdsaStakeRegistry.getOperatorWeightAtEpoch(operator, currentEpoch);
+            uint256 previousWeight = ecdsaStakeRegistry.getOperatorWeightAtEpoch(operator, currentEpoch - 1);
+            
+            if (currentWeight == 0 || previousWeight == 0) {
+                revert StateDisputeResolver__NotActiveOperator();
+            }
+
+            // Check if already challenged
+            if (operatorChallenged[taskId][operator]) {
+                revert StateDisputeResolver__AlreadyChallenged();
+            }
+
+            // Mark as challenged and add to array
+            operatorChallenged[taskId][operator] = true;
+            challenge.challengedOperators.push(operator);
+
+            unchecked { ++i; }
         }
 
-        challenges[challengeId] = Challenge({
-            challenger: msg.sender,
-            deadline: uint64(block.number + CHALLENGE_PERIOD),
-            resolved: false,
-            state: state,
-            operators: operators,
-            actualState: UNVERIFIED
-        });
+        // Add challenger
+        challenge.challengers.push(msg.sender);
 
-        emit ChallengeSubmitted(challengeId, msg.sender);
+        emit ChallengeSubmitted(taskId, msg.sender);
+    }
+
+    /// @notice Claim accumulated rewards
+    function claim() external nonReentrant {
+        uint256 amount = claimableAmount[msg.sender];
+        if(amount == 0) {
+            revert StateDisputeResolver__NoFundsToClaim();
+        }
+        
+        // Update state before transfer
+        claimableAmount[msg.sender] = 0;
+        
+        // Transfer funds
+        (bool success, ) = msg.sender.call{value: amount}("");
+        if(!success) {
+            revert StateDisputeResolver__TransferFailed();
+        }
+        
+        emit ClaimProcessed(msg.sender, amount);
     }
 
     /// @notice Resolves a submitted challenge
-    /// @param challengeId Identifier of the challenge to resolve
-    /// @dev Verifies state and handles slashing if challenge is successful
-    function resolveChallenge(
-        bytes32 challengeId
-    ) external {
-        Challenge storage challenge = challenges[challengeId];
+    /// @param taskId Identifier of the challenge to resolve
+    function resolveChallenge(bytes32 taskId) external {
+        Challenge storage challenge = challenges[taskId];
+
         if (challenge.resolved) {
             revert StateDisputeResolver__ChallengeAlreadyResolved();
         }
-        if (block.number >= challenge.deadline) {
-            revert StateDisputeResolver__ChallengePeriodClosed();
+
+        if (challenge.challengers.length == 0) {
+            revert StateDisputeResolver__NoChallengers();
         }
 
-        // Get verified state from MainChainVerifier
+        // Get verified state
         (uint256 actualValue, bool exist) = mainChainVerifier.getVerifiedState(
             challenge.state.chainId,
             challenge.state.user,
@@ -218,55 +239,60 @@ contract StateDisputeResolver is
         }
 
         bool challengeSuccessful = challenge.state.value != actualValue;
+        challenge.resolved = true;
 
-        // Slash operators if challenge successful
         if (challengeSuccessful) {
-            for (uint256 i = 0; i < challenge.operators.length; i++) {
-                _slashOperator(challenge.operators[i], challengeId);
+            // Record claimable amounts for challengers instead of direct transfer
+            uint256 challengerCount = challenge.challengers.length;
+            for (uint256 i = 0; i < challengerCount;) {
+                address challenger = challenge.challengers[i];
+                claimableAmount[challenger] += CHALLENGE_BOND;
+                unchecked { ++i; }
             }
-            payable(msg.sender).transfer(CHALLENGE_BOND);
+
+            // Slash operators
+            uint256 operatorCount = challenge.challengedOperators.length;
+            for (uint256 i = 0; i < operatorCount;) {
+                address operator = challenge.challengedOperators[i];
+                
+                _slashOperator(operator, taskId);          
+                unchecked { ++i; }
+            }
         }
 
-        challenge.resolved = true;
-        challenge.actualState = actualValue;
+        // Clear arrays
+        delete challenge.challengedOperators;
+        delete challenge.challengers;
 
-        emit ChallengeResolved(challengeId, challengeSuccessful);
+        emit ChallengeResolved(taskId, challengeSuccessful);
     }
 
     /// @notice Updates the operator set ID
     /// @param newSetId New operator set identifier
-    function setOperatorSetId(
-        uint32 newSetId
-    ) external onlyOwner {
+    function setOperatorSetId(uint32 newSetId) external onlyOwner {
         currentOperatorSetId = newSetId;
         emit OperatorSetIdUpdated(newSetId);
     }
 
     /// @notice Sets the strategies that can be slashed
     /// @param strategies Array of strategy contracts
-    function setSlashableStrategies(
-        IStrategy[] calldata strategies
-    ) external onlyOwner {
+    function setSlashableStrategies(IStrategy[] calldata strategies) external onlyOwner {
         uint256 strategiesLength = strategies.length;
         if (strategiesLength == 0) {
             revert StateDisputeResolver__EmptyStrategiesArray();
         }
         delete slashableStrategies;
-
+        
         for (uint256 i = 0; i < strategiesLength;) {
             slashableStrategies.push(strategies[i]);
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
         emit SlashableStrategiesUpdated(strategies);
     }
 
     /// @notice Updates the slash amount
     /// @param newAmount New slash amount in WAD format
-    function setSlashAmount(
-        uint256 newAmount
-    ) external onlyOwner {
+    function setSlashAmount(uint256 newAmount) external onlyOwner {
         if (newAmount > 1e18) {
             revert StateDisputeResolver__InvalidSlashAmount();
         }
@@ -274,36 +300,10 @@ contract StateDisputeResolver is
         emit SlashAmountUpdated(newAmount);
     }
 
-    /// @notice Sets the service manager address
-    /// @param _serviceManager Address of new service manager
-    function setServiceManager(
-        address _serviceManager
-    ) external onlyOwner {
-        if (_serviceManager == address(0)) {
-            revert StateDisputeResolver__InvalidServiceManagerAddress();
-        }
-        serviceManager = ISpottedServiceManager(_serviceManager);
-        emit ServiceManagerSet(_serviceManager);
-    }
-
-    /// @notice Sets the main chain verifier address
-    /// @param _verifier Address of new main chain verifier
-    function setMainChainVerifier(
-        address _verifier
-    ) external onlyOwner {
-        if (_verifier == address(0)) {
-            revert StateDisputeResolver__InvalidVerifierAddress();
-        }
-        mainChainVerifier = IMainChainVerifier(_verifier);
-        emit MainChainVerifierSet(_verifier);
-    }
-
     /// @notice Retrieves challenge information
     /// @param challengeId Identifier of the challenge
     /// @return Challenge Challenge data structure
-    function getChallenge(
-        bytes32 challengeId
-    ) external view returns (Challenge memory) {
+    function getChallenge(bytes32 challengeId) external view returns (Challenge memory) {
         return challenges[challengeId];
     }
 
@@ -335,7 +335,10 @@ contract StateDisputeResolver is
             )
         });
 
-        allocationManager.slashOperator(address(this), params);
-        emit OperatorSlashed(operator, challengeId);
+        try allocationManager.slashOperator(address(this), params) {
+            emit OperatorSlashed(operator, challengeId);
+        } catch {
+            emit SlashingFailed(operator, challengeId);
+        }
     }
 }

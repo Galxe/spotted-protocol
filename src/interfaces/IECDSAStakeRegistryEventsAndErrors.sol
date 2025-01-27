@@ -124,4 +124,7 @@ interface ECDSAStakeRegistryEventsAndErrors {
 
     /// @notice Thrown when the reference epoch is invalid
     error InvalidEpoch();
+
+    /// @notice Thrown when the signing key already exists
+    error SigningKeyAlreadyExists();
 }

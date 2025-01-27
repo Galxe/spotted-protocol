@@ -401,12 +401,12 @@ contract StateManager is IStateManager {
         }
 
         uint256 index = _binarySearch(keyHistory, blockNumber, SearchType.BLOCK_NUMBER);
-        // check if the found position is exactly equal to the target block number
-        if (index >= keyHistory.length || keyHistory[index].blockNumber != blockNumber) {
-            revert StateManager__BlockNotFound();
+        // if index is valid and the block number at index is less than or equal to target
+        if (index < keyHistory.length && keyHistory[index].blockNumber <= blockNumber) {
+            return keyHistory[index];
         }
-
-        return keyHistory[index];
+        // if no valid history found before or at the target block
+        revert StateManager__BlockNotFound();
     }
 
     /// @notice Gets history at a specific timestamp

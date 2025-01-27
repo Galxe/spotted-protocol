@@ -116,6 +116,10 @@ interface IECDSAStakeRegistry {
         uint32 _epochNumber
     ) external view returns (address);
 
+    function getOperatorBySigningKey(
+        address _signingKey
+    ) external view returns (address);
+
     function operatorRegistered(
         address operator
     ) external view returns (bool);

@@ -323,6 +323,15 @@ contract ECDSAStakeRegistry is
         return _thresholdWeightHistory.getAtEpoch(_epochNumber);
     }
 
+    /// @notice Gets the operator associated with a signing key
+    /// @param _signingKey The signing key to query
+    /// @return The operator associated with the signing key
+    function getOperatorBySigningKey(
+        address _signingKey
+    ) external view returns (address) {
+        return _signingKeyToOperator[_signingKey];
+    }
+
     /// @notice Checks if an operator is currently registered
     /// @param _operator Address of the operator to check
     /// @return True if operator is registered, false otherwise
@@ -496,6 +505,10 @@ contract ECDSAStakeRegistry is
             return;
         }
         _operatorSigningKeyHistory[_operator].push(uint160(_newSigningKey));
+        if (_signingKeyToOperator[_newSigningKey] != address(0)) {
+            revert SigningKeyAlreadyExists();
+        }
+        _signingKeyToOperator[_newSigningKey] = _operator;
         emit SigningKeyUpdate(_operator, _newSigningKey, oldSigningKey);
     }
 
@@ -636,7 +649,7 @@ contract ECDSAStakeRegistry is
         }
     }
 
-    /// @notice Retrieves the operator weight for a signer, either at the last checkpoint or a specified epoch.
+    /// @notice Retrieves the operator signing key for a signer, either at the last checkpoint or a specified epoch.
     /// @param _operator The operator to query their signing key history for
     /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
     /// @return The weight of the operator.

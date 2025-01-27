@@ -35,6 +35,7 @@ abstract contract ECDSAStakeRegistryStorage is ECDSAStakeRegistryEventsAndErrors
 
     /// @notice Maps an operator to their signing key history using checkpoints
     mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorSigningKeyHistory;
+    mapping(address => address) internal _signingKeyToOperator;
 
     /// @notice Tracks the total stake history over time using checkpoints
     EpochCheckpointsUpgradeable.History internal _totalWeightHistory;

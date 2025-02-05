@@ -401,12 +401,12 @@ contract StateManager is IStateManager {
         }
 
         uint256 index = _binarySearch(keyHistory, blockNumber, SearchType.BLOCK_NUMBER);
-        // check if the found position is exactly equal to the target block number
-        if (index >= keyHistory.length || keyHistory[index].blockNumber != blockNumber) {
-            revert StateManager__BlockNotFound();
+        // if index is valid and the block number at index is less than or equal to target
+        if (index < keyHistory.length && keyHistory[index].blockNumber <= blockNumber) {
+            return keyHistory[index];
         }
-
-        return keyHistory[index];
+        // if no valid history found before or at the target block
+        revert StateManager__BlockNotFound();
     }
 
     /// @notice Gets history at a specific timestamp
@@ -436,10 +436,7 @@ contract StateManager is IStateManager {
     /// @param user The user address to query
     /// @param key The key to query
     /// @return uint256 The number of historical entries
-    function getHistoryCount(
-        address user,
-        uint256 key
-    ) external view returns (uint256) {
+    function getHistoryCount(address user, uint256 key) external view returns (uint256) {
         return histories[user][key].length;
     }
 
@@ -464,10 +461,7 @@ contract StateManager is IStateManager {
     /// @param user The user address to query
     /// @param n The number of latest records to return
     /// @return History[] Array of the latest historical values
-    function getLatestHistory(
-        address user,
-        uint256 n
-    ) external view returns (History[] memory) {
+    function getLatestHistory(address user, uint256 n) external view returns (History[] memory) {
         uint256[] storage keys = userKeys[user];
         if (keys.length == 0) {
             revert StateManager__NoHistoryFound();
@@ -521,10 +515,7 @@ contract StateManager is IStateManager {
     /// @param user The user address to query
     /// @param key The key to query
     /// @return Array of all historical values
-    function getHistory(
-        address user,
-        uint256 key
-    ) external view returns (History[] memory) {
+    function getHistory(address user, uint256 key) external view returns (History[] memory) {
         return histories[user][key];
     }
 }

@@ -28,5 +28,4 @@ interface IRemoteChainVerifier {
     function stateManager() external view returns (IStateManager);
     function mainChainId() external view returns (uint256);
     function mainChainVerifier() external view returns (address);
-
 }

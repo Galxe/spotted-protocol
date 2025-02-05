@@ -10,12 +10,12 @@ Spotted is an innovative AVS (Actively Validated Service) built on EigenLayer th
 - Optimistic verification with challenge-based security
 - Decentralized verification through operator quorums
 
-| Feature | Traditional Bridge (LayerZero/CCIP) | Spotted's Cryptographic Proof |
+| Feature | Traditional Bridge (e.g. LayerZero/CCIP) | Spotted's Cryptographic Proof |
 |---------|-------------------------------------|------------------------------|
 | Verification Method | Message Passing | Signature-based Verification |
-| Gas Cost | 300,000 - 400,000 + extra fee (network fee) | 50,000 - 140,000 (based on operators number) + $0 extra fee|
-| Latency | Minutes (waiting for confirmations) | Instant |
-| Trust Assumptions | Trust in relayers | Cryptographic verification |
+| Gas Cost | 300,000 - 400,000 + extra fee (e.g. network fee) | 50,000 - 140,000 (based on operators number) + $0 extra fee|
+| Latency | Minutes (depending on chain's block confirmation number) | Instant |
+| Security Asset Pool | Isolated staking pool | Possibly leverages entire EigenLayer ecosystem stake ($10+ billion)  |
 
 ### Advanced Task Distribution System
 - Intelligent off-chain task generation with dynamic operator assignment

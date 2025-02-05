@@ -63,18 +63,16 @@ contract RegistryStateSender is IRegistryStateSender, Ownable {
     /// @param _bridge The address of the bridge contract
     /// @param _receiver The address of the receiver contract
     /// @dev Only callable by owner
-    function addBridge(
-        uint256 _chainId,
-        address _bridge,
-        address _receiver
-    ) external onlyOwner {
+    function addBridge(uint256 _chainId, address _bridge, address _receiver) external onlyOwner {
         _addBridge(_chainId, _bridge, _receiver);
     }
 
     /// @notice Removes a bridge configuration for a chain
     /// @param _chainId The ID of the chain to remove
     /// @dev Only callable by owner
-    function removeBridge(uint256 _chainId) external onlyOwner {
+    function removeBridge(
+        uint256 _chainId
+    ) external onlyOwner {
         if (chainToBridgeInfo[_chainId].bridge == address(0)) {
             revert RegistryStateSender__ChainNotSupported();
         }
@@ -95,11 +93,7 @@ contract RegistryStateSender is IRegistryStateSender, Ownable {
     /// @param _bridge The address of the bridge contract
     /// @param _receiver The address of the receiver contract
     /// @dev Validates addresses and prevents duplicate bridges
-    function _addBridge(
-        uint256 _chainId,
-        address _bridge,
-        address _receiver
-    ) internal {
+    function _addBridge(uint256 _chainId, address _bridge, address _receiver) internal {
         if (_bridge == address(0) || _receiver == address(0)) {
             revert RegistryStateSender__InvalidBridgeInfo();
         }
@@ -126,11 +120,8 @@ contract RegistryStateSender is IRegistryStateSender, Ownable {
 
         bytes memory data = abi.encode(epoch, updates);
 
-        (, uint256 fee) = IAbridge(bridgeInfo.bridge).estimateFee(
-            bridgeInfo.receiver,
-            EXECUTE_GAS_LIMIT,
-            data
-        );
+        (, uint256 fee) =
+            IAbridge(bridgeInfo.bridge).estimateFee(bridgeInfo.receiver, EXECUTE_GAS_LIMIT, data);
 
         if (msg.value < fee) revert RegistryStateSender__InsufficientFee();
 

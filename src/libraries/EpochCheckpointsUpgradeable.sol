@@ -9,7 +9,6 @@ import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
 /// Library for tracking value changes by epoch number for cross-chain compatibility (mainnet)
 library EpochCheckpointsUpgradeable {
-
     error InvalidEpoch();
 
     address public constant EPOCH_MANAGER = 0x0000000000000000000000000000000000000000; // dummy address
@@ -36,7 +35,7 @@ library EpochCheckpointsUpgradeable {
         History storage self,
         uint256 epochNumber
     ) internal view returns (uint256) {
-        // 使用constant EPOCH_MANAGER
+
         uint256 currentEpoch = IEpochManager(EPOCH_MANAGER).getCurrentEpoch();
         if (epochNumber > currentEpoch) {
             revert InvalidEpoch();
@@ -62,7 +61,7 @@ library EpochCheckpointsUpgradeable {
         uint256 pos = self._checkpoints.length;
         uint256 old = latest(self);
 
-        uint32 currentEpoch = uint32(IEpochManager(EPOCH_MANAGER).getCurrentEpoch());
+        uint32 currentEpoch = uint32(IEpochManager(EPOCH_MANAGER).getEffectiveEpochForBlock(uint64(block.number)));
 
         if (pos > 0 && self._checkpoints[pos - 1]._epochNumber == currentEpoch) {
             self._checkpoints[pos - 1]._value = SafeCastUpgradeable.toUint224(value);

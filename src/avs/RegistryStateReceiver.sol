@@ -16,10 +16,10 @@ import {IEpochManager} from "../interfaces/IEpochManager.sol";
 contract RegistryStateReceiver is IRegistryStateReceiver, Ownable {
     /// @notice The bridge contract used for cross-chain communication
     IAbridge public immutable abridge;
-    
+
     /// @notice The authorized sender address on the source chain
     address public immutable sender;
-    
+
     /// @notice The stake registry contract that receives state updates
     ILightStakeRegistry public immutable stakeRegistry;
 

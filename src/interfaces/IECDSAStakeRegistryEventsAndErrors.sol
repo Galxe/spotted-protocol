@@ -13,7 +13,6 @@ struct Quorum {
 }
 
 interface ECDSAStakeRegistryEventsAndErrors {
-    
     enum MessageType {
         REGISTER,
         DEREGISTER,
@@ -31,12 +30,18 @@ interface ECDSAStakeRegistryEventsAndErrors {
     /// @notice Emitted when the system registers an operator
     /// @param _operator The address of the registered operator
     /// @param _avs The address of the associated AVS
-    event OperatorRegistered(address indexed _operator, address indexed _avs);
+    event OperatorRegistered(
+        address indexed _operator,
+        uint256 indexed blockNumber,
+        address indexed _signingKey,
+        uint256 timestamp,
+        address _avs
+    );
 
     /// @notice Emitted when the system deregisters an operator
     /// @param _operator The address of the deregistered operator
     /// @param _avs The address of the associated AVS
-    event OperatorDeregistered(address indexed _operator, address indexed _avs);
+    event OperatorDeregistered(address indexed _operator, uint256 indexed blockNumber, address indexed _avs);
 
     /// @notice Emitted when the system updates the quorum
     /// @param _old The previous quorum configuration
@@ -74,6 +79,13 @@ interface ECDSAStakeRegistryEventsAndErrors {
     event SigningKeyUpdate(
         address indexed operator, address indexed newSigningKey, address oldSigningKey
     );
+
+    /// @notice Emitted when an operator's P2P key is updated
+    /// @param operator The address of the operator whose P2P key was updated
+    /// @param newP2PKey The operator's P2P key after the update
+    /// @param oldP2PKey The operator's P2P key before the update
+    event P2PKeyUpdate(address indexed operator, address indexed newP2PKey, address oldP2PKey);
+
     /// @notice Indicates when the lengths of the signers array and signatures array do not match.
 
     error LengthMismatch();
@@ -119,4 +131,7 @@ interface ECDSAStakeRegistryEventsAndErrors {
 
     /// @notice Thrown when the reference epoch is invalid
     error InvalidEpoch();
+
+    /// @notice Thrown when the signing key already exists
+    error SigningKeyAlreadyExists();
 }

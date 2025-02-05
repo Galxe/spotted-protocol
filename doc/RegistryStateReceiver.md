@@ -95,16 +95,3 @@ error RegistryStateReceiver__BatchUpdateFailed()
 event UpdateProcessed(uint256 epoch, uint256 updateCount)
 ```
 
-## Constructor Configuration
-```solidity
-constructor(
-    address _abridge,
-    address _sender,
-    address _stakeRegistry,
-    address _owner
-)
-```
-- Initializes contract with required addresses
-- Sets up initial bridge routing
-- Establishes ownership
-- Validates configuration parameters

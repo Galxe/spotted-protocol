@@ -79,6 +79,13 @@ interface ECDSAStakeRegistryEventsAndErrors {
     event SigningKeyUpdate(
         address indexed operator, address indexed newSigningKey, address oldSigningKey
     );
+
+    /// @notice Emitted when an operator's P2P key is updated
+    /// @param operator The address of the operator whose P2P key was updated
+    /// @param newP2PKey The operator's P2P key after the update
+    /// @param oldP2PKey The operator's P2P key before the update
+    event P2PKeyUpdate(address indexed operator, address indexed newP2PKey, address oldP2PKey);
+
     /// @notice Indicates when the lengths of the signers array and signatures array do not match.
 
     error LengthMismatch();

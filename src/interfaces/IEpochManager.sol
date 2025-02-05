@@ -12,7 +12,8 @@ interface IEpochManager {
         UPDATE_THRESHOLD,
         UPDATE_OPERATORS_QUORUM,
         BATCH_UPDATE,
-        UPDATE_OPERATORS_FOR_QUORUM
+        UPDATE_OPERATORS_FOR_QUORUM,
+        UPDATE_P2P_KEY
     }
 
     struct StateUpdate {

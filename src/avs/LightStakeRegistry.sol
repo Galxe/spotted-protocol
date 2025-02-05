@@ -79,6 +79,8 @@ contract LightStakeRegistry is
                 _handleUpdateThreshold(update.data);
             } else if (update.updateType == IEpochManager.MessageType.UPDATE_OPERATORS_FOR_QUORUM) {
                 _handleUpdateOperatorsForQuorum(update.data);
+            } else if (update.updateType == IEpochManager.MessageType.UPDATE_P2P_KEY) {
+                _handleUpdateP2PKey(update.data);
             } else {
                 revert InvalidMessageType();
             }
@@ -417,6 +419,23 @@ contract LightStakeRegistry is
         _operatorSigningKeyHistory[operator].push(uint160(newSigningKey));
 
         emit SigningKeyUpdate(operator, newSigningKey, oldSigningKey);
+    }
+
+    /// @notice Handles updating an operator's P2P key
+    /// @param data Encoded data containing operator and new P2P key
+    /// @dev Only updates if new key is different from current key
+    function _handleUpdateP2PKey(
+        bytes memory data
+    ) internal {
+        (address operator, address newP2PKey) = abi.decode(data, (address, address));
+
+        address oldP2PKey = address(uint160(_operatorP2PKeyHistory[operator].latest()));
+        if (newP2PKey == oldP2PKey) {
+            return;
+        }
+        _operatorP2PKeyHistory[operator].push(uint160(newP2PKey));
+
+        emit P2PKeyUpdate(operator, newP2PKey, oldP2PKey);
     }
 
     /// @notice Handles updating multiple operators' weights

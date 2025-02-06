@@ -10,6 +10,7 @@ import {IEpochManager} from "../interfaces/IEpochManager.sol";
 /// Library for tracking value changes by epoch number for cross-chain compatibility (mainnet)
 library EpochCheckpointsUpgradeable {
     error InvalidEpoch();
+    error EpochAlreadyHasRecord();
 
     address public constant EPOCH_MANAGER = 0x0000000000000000000000000000000000000000; // dummy address
 
@@ -56,23 +57,26 @@ library EpochCheckpointsUpgradeable {
         return high == 0 ? 0 : self._checkpoints[high - 1]._value;
     }
 
-    /// Pushes a new value checkpoint for the current epoch
+    /// @notice Pushes a new value checkpoint for the current epoch
+    /// @dev Reverts if a record for this epoch already exists
     function push(History storage self, uint256 value) internal returns (uint256, uint256) {
         uint256 pos = self._checkpoints.length;
         uint256 old = latest(self);
 
         uint32 currentEpoch = uint32(IEpochManager(EPOCH_MANAGER).getEffectiveEpochForBlock(uint64(block.number)));
-
+        
+        // check if state already exists
         if (pos > 0 && self._checkpoints[pos - 1]._epochNumber == currentEpoch) {
-            self._checkpoints[pos - 1]._value = SafeCastUpgradeable.toUint224(value);
-        } else {
-            self._checkpoints.push(
-                Checkpoint({
-                    _epochNumber: currentEpoch,
-                    _value: SafeCastUpgradeable.toUint224(value)
-                })
-            );
+            revert EpochAlreadyHasRecord();
         }
+
+        self._checkpoints.push(
+            Checkpoint({
+                _epochNumber: currentEpoch,
+                _value: SafeCastUpgradeable.toUint224(value)
+            })
+        );
+        
         return (old, value);
     }
 

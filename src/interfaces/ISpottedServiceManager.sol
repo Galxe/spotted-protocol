@@ -18,7 +18,6 @@ interface ISpottedServiceManager {
         address user,
         uint32 chainId,
         uint64 blockNumber,
-        uint32 epoch,
         uint256 key,
         uint256 value
     ) external pure returns (bytes32);

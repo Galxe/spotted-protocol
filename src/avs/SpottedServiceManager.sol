@@ -84,7 +84,6 @@ contract SpottedServiceManager is
     /// @param user Address of the user initiating the task
     /// @param chainId ID of the chain where the task is executed
     /// @param blockNumber Block number associated with the task
-    /// @param epoch Epoch number when the task was created
     /// @param key Task-specific key parameter
     /// @param value Task-specific value parameter
     /// @return bytes32 Unique identifier for the task
@@ -92,10 +91,9 @@ contract SpottedServiceManager is
         address user,
         uint32 chainId,
         uint64 blockNumber,
-        uint32 epoch,
         uint256 key,
         uint256 value
     ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(user, chainId, blockNumber, epoch, key, value));
+        return keccak256(abi.encodePacked(user, chainId, blockNumber, key, value));
     }
 }

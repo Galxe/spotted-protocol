@@ -134,9 +134,6 @@ contract StateDisputeResolver is
         // Generate task ID
         bytes32 taskId = keccak256(abi.encode(stateData));
 
-        // Get current epoch
-        uint32 currentEpoch = epochManager.getCurrentEpoch();
-
         // Generate the hash that was signed
         bytes32 structHash = keccak256(
             abi.encode(
@@ -167,15 +164,9 @@ contract StateDisputeResolver is
         for (uint256 i = 0; i < signatures.length;) {
             address signingKey = ECDSA.recover(hashData, signatures[i]);
             address operator = ecdsaStakeRegistry.getOperatorBySigningKey(signingKey);
-
-            // Check operator status
-            uint256 currentWeight = ecdsaStakeRegistry.getOperatorWeightAtEpoch(operator, currentEpoch);
-            uint256 previousWeight = ecdsaStakeRegistry.getOperatorWeightAtEpoch(operator, currentEpoch - 1);
-            
-            if (currentWeight == 0 || previousWeight == 0) {
-                revert StateDisputeResolver__NotActiveOperator();
+            if (operator == address(0)) {
+                revert StateDisputeResolver__InvalidSignature();
             }
-
             // Check if already challenged
             if (operatorChallenged[taskId][operator]) {
                 revert StateDisputeResolver__AlreadyChallenged();

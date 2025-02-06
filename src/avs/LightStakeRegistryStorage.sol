@@ -42,8 +42,8 @@ abstract contract LightStakeRegistryStorage is LightStakeRegistryEventsAndErrors
     /// @notice Maps an operator to their registration status
     mapping(address => bool) internal _operatorRegistered;
 
-    /// @notice Maps an operator to their P2P key history using checkpoints
-    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorP2PKeyHistory;
+    /// @notice Maps an operator to their P2p key history using checkpoints
+    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorP2pKeyHistory;
 
     constructor(address _registryStateReceiver) {
         REGISTRY_STATE_RECEIVER = IRegistryStateReceiver(_registryStateReceiver);

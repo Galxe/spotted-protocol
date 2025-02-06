@@ -100,18 +100,18 @@ contract ECDSAStakeRegistry is
         EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_SIGNING_KEY, data);
     }
 
-    /// @notice Updates the P2P key for an operator
+    /// @notice Updates the P2p key for an operator
     /// @dev Only callable by the operator themselves
-    /// @param _newP2PKey The new P2P key to set for the operator
-    function updateOperatorP2PKey(
-        address _newP2PKey
+    /// @param _newP2pKey The new P2p key to set for the operator
+    function updateOperatorP2pKey(
+        address _newP2pKey
     ) external {
         if (!_operatorRegistered[msg.sender]) {
             revert OperatorNotRegistered();
         }
-        _updateOperatorP2PKey(msg.sender, _newP2PKey);
+        _updateOperatorP2pKey(msg.sender, _newP2pKey);
 
-        bytes memory data = abi.encode(msg.sender, _newP2PKey);
+        bytes memory data = abi.encode(msg.sender, _newP2pKey);
         EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_P2P_KEY, data);
     }
 
@@ -281,12 +281,11 @@ contract ECDSAStakeRegistry is
     /// @notice Gets the latest signing key for an operator
     /// @param _operator Address of the operator to query
     /// @return Latest signing key associated with the operator
-    function getLastestOperatorP2PKey(
+    function getLastestOperatorP2pKey(
         address _operator
     ) external view returns (address) {
-        return address(uint160(_operatorP2PKeyHistory[_operator].latest()));
+        return address(uint160(_operatorP2pKeyHistory[_operator].latest()));
     }
-
 
     /// @notice Gets an operator's signing key at a specific epoch
     /// @param _operator Address of the operator to query
@@ -297,6 +296,16 @@ contract ECDSAStakeRegistry is
         uint32 _epochNumber
     ) external view returns (address) {
         return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_epochNumber)));
+    }
+
+    /// @notice Gets the latest P2p key for an operator
+    /// @param _operator Address of the operator to query
+    /// @return Latest P2p key for the operator
+    function getOperatorP2pKeyAtEpoch(
+        address _operator,
+        uint32 _epochNumber
+    ) external view returns (address) {
+        return address(uint160(_operatorP2pKeyHistory[_operator].getAtEpoch(_epochNumber)));
     }
 
     /// @notice Gets the latest recorded weight for an operator
@@ -349,6 +358,14 @@ contract ECDSAStakeRegistry is
         return _thresholdWeightHistory.getAtEpoch(_epochNumber);
     }
 
+    /// @notice Gets the operator associated with a signing key
+    /// @param _signingKey The signing key to query
+    /// @return The operator associated with the signing key
+    function getOperatorBySigningKey(
+        address _signingKey
+    ) external view returns (address) {
+        return _operatorToSigningKey[_signingKey];
+    }
     /// @notice Checks if an operator is currently registered
     /// @param _operator Address of the operator to check
     /// @return True if operator is registered, false otherwise
@@ -508,10 +525,10 @@ contract ECDSAStakeRegistry is
         int256 delta = _updateOperatorWeight(_operator);
         _updateTotalWeight(delta);
         _updateOperatorSigningKey(_operator, _signingKey);
-        _updateOperatorP2PKey(_operator, _p2pKey);
+        _updateOperatorP2pKey(_operator, _p2pKey);
         SERVICE_MANAGER.registerOperatorToAVS(_operator, _operatorSignature);
         emit OperatorRegistered(
-            _operator, block.number, _signingKey, block.timestamp, address(SERVICE_MANAGER)
+            _operator, block.number, _p2pKey, _signingKey, address(SERVICE_MANAGER)
         );
     }
 
@@ -523,20 +540,24 @@ contract ECDSAStakeRegistry is
         if (_newSigningKey == oldSigningKey) {
             return;
         }
+        if (_operatorToSigningKey[_operator] != address(0)) {
+            revert SigningKeyAlreadySet();
+        }
         _operatorSigningKeyHistory[_operator].push(uint160(_newSigningKey));
+        _operatorToSigningKey[_operator] = _newSigningKey;
         emit SigningKeyUpdate(_operator, _newSigningKey, oldSigningKey);
     }
 
-    /// @dev Internal function to update an operator's P2P key
-    /// @param _operator The address of the operator to update the P2P key for
-    /// @param _newP2PKey The new P2P key to set for the operator
-    function _updateOperatorP2PKey(address _operator, address _newP2PKey) internal {
-        address oldP2PKey = address(uint160(_operatorP2PKeyHistory[_operator].latest()));
-        if (_newP2PKey == oldP2PKey) {
+    /// @dev Internal function to update an operator's P2p key
+    /// @param _operator The address of the operator to update the P2p key for
+    /// @param _newP2pKey The new P2p key to set for the operator
+    function _updateOperatorP2pKey(address _operator, address _newP2pKey) internal {
+        address oldP2pKey = address(uint160(_operatorP2pKeyHistory[_operator].latest()));
+        if (_newP2pKey == oldP2pKey) {
             return;
         }
-        _operatorP2PKeyHistory[_operator].push(uint160(_newP2PKey));
-        emit P2PKeyUpdate(_operator, _newP2PKey, oldP2PKey);
+        _operatorP2pKeyHistory[_operator].push(uint160(_newP2pKey));
+        emit P2pKeyUpdate(_operator, _newP2pKey, oldP2pKey);
     }
 
     /// @notice Updates the weight of an operator and returns the previous and current weights.

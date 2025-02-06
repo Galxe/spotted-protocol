@@ -33,8 +33,8 @@ interface ECDSAStakeRegistryEventsAndErrors {
     event OperatorRegistered(
         address indexed _operator,
         uint256 indexed blockNumber,
-        address indexed _signingKey,
-        uint256 timestamp,
+        address indexed _p2pKey,
+        address _signingKey,
         address _avs
     );
 
@@ -79,12 +79,14 @@ interface ECDSAStakeRegistryEventsAndErrors {
     event SigningKeyUpdate(
         address indexed operator, address indexed newSigningKey, address oldSigningKey
     );
-
-    /// @notice Emitted when an operator's P2P key is updated
-    /// @param operator The address of the operator whose P2P key was updated
-    /// @param newP2PKey The operator's P2P key after the update
-    /// @param oldP2PKey The operator's P2P key before the update
-    event P2PKeyUpdate(address indexed operator, address indexed newP2PKey, address oldP2PKey);
+    
+    /// @notice Emitted when an operator's P2p key is updated
+    /// @param operator The address of the operator whose P2p key was updated
+    /// @param newP2pKey The operator's P2p key after the update
+    /// @param oldP2pKey The operator's P2p key before the update
+    event P2pKeyUpdate(
+        address indexed operator, address indexed newP2pKey, address oldP2pKey
+    );
 
     /// @notice Indicates when the lengths of the signers array and signatures array do not match.
 
@@ -134,4 +136,7 @@ interface ECDSAStakeRegistryEventsAndErrors {
 
     /// @notice Thrown when the signing key already exists
     error SigningKeyAlreadyExists();
+
+    /// @notice Thrown when the signing key is not set
+    error SigningKeyAlreadySet();
 }

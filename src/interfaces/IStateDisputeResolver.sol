@@ -21,6 +21,7 @@ interface IStateDisputeResolver {
     error StateDisputeResolver__InvalidSlashAmount();
     error StateDisputeResolver__NoFundsToClaim();
     error StateDisputeResolver__TransferFailed();
+    error StateDisputeResolver__InvalidSignature();
 
     struct State {
         address user;

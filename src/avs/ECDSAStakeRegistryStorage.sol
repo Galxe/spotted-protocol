@@ -48,8 +48,11 @@ abstract contract ECDSAStakeRegistryStorage is ECDSAStakeRegistryEventsAndErrors
     /// @notice Maps an operator to their registration status
     mapping(address => bool) internal _operatorRegistered;
 
-    /// @notice Maps an operator to their P2P key history using checkpoints
-    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorP2PKeyHistory;
+    /// @notice Maps an operator to their signing key
+    mapping(address => address) internal _operatorToSigningKey;
+
+    /// @notice Maps an operator to their P2p key history using checkpoints
+    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorP2pKeyHistory;
 
     /// @param _delegationManager Connects this registry with the DelegationManager
     constructor(address _delegationManager, address _epochManager, address _serviceManager) {

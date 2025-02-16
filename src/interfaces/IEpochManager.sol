@@ -34,6 +34,7 @@ interface IEpochManager {
     // view functions
     function isInGracePeriod() external view returns (bool);
     function blocksUntilNextEpoch() external view returns (uint64);
+    function getStartBlockForEpoch(uint32 epoch) external view returns (uint64);
     function blocksUntilGracePeriod() external view returns (uint64);
     function getEffectiveEpoch() external view returns (uint32);
     function getCurrentEpoch() external view returns (uint32);

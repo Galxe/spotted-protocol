@@ -153,4 +153,11 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
     function getNextEpochBlock() public view returns (uint64) {
         return getCurrentEpochBlock() + EPOCH_LENGTH;
     }
+
+    /// @notice Gets the start block for a given epoch number
+    /// @param epoch The epoch number to query
+    /// @return uint64 The start block of the specified epoch
+    function getStartBlockForEpoch(uint32 epoch) public view returns (uint64) {
+        return GENESIS_BLOCK + (epoch * EPOCH_LENGTH);
+    }
 }

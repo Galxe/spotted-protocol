@@ -27,6 +27,7 @@ interface IEpochManager {
     error EpochManager__UpdateAlreadyProcessed();
     error EpochManager__UpdateNotAllowed();
     error EpochManager__InvalidEpochForUpdate();
+    error EpochManager__UnauthorizedAccess();
 
     event StateUpdateQueued(uint32 indexed epoch, MessageType updateType, bytes data);
     event StateUpdatesSent(uint32 indexed epoch, uint256 updatesCount);
@@ -38,8 +39,8 @@ interface IEpochManager {
     function blocksUntilGracePeriod() external view returns (uint64);
     function getEffectiveEpoch() external view returns (uint32);
     function getCurrentEpoch() external view returns (uint32);
-    function getCurrentEpochBlock() external view returns (uint64);
-    function getNextEpochBlock() external view returns (uint64);
+    function getCurrentEpochStartBlock() external view returns (uint64);
+    function getNextEpochStartBlock() external view returns (uint64);
     function getEpochInterval(
         uint32 epoch
     ) external view returns (uint64 startBlock, uint64 graceBlock, uint64 endBlock);

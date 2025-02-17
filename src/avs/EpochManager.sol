@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {OwnableUpgradeable} from "@openzeppelin-upgrades/contracts/access/OwnableUpgradeable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
 import {IRegistryStateSender} from "../interfaces/IRegistryStateSender.sol";
 
@@ -9,7 +9,7 @@ import {IRegistryStateSender} from "../interfaces/IRegistryStateSender.sol";
 /// @author Spotted Team
 /// @notice Manages epoch transitions and state updates for the AVS system
 /// @dev Handles epoch advancement, grace periods, and state synchronization
-contract EpochManager is IEpochManager, OwnableUpgradeable {
+contract EpochManager is IEpochManager, Ownable {
     /// @notice Genesis block number when contract was deployed
     /// @dev Immutable after deployment
     uint64 public immutable GENESIS_BLOCK;
@@ -26,20 +26,35 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
     /// @dev Immutable after deployment
     address public immutable REGISTRY_STATE_SENDER;
 
+    /// @notice Address of the stake registry contract
+    /// @dev Immutable after deployment
+    address public immutable STAKE_REGISTRY;
+
     /// @notice State updates for each epoch
     mapping(uint32 epochNumber => StateUpdate[] updates) internal epochUpdates;
 
+    /// @notice Modifier to restrict access to only the stake registry
+    /// @dev Reverts if caller is not the stake registry
+    modifier onlyStakeRegistry() {
+        if (msg.sender != STAKE_REGISTRY) {
+            revert EpochManager__UnauthorizedAccess();
+        }
+        _;
+    }
+
     /// @notice Initializes the contract with required parameters
     /// @param _registryStateSender Address of the registry state sender contract
-    constructor(address _registryStateSender) {
+    /// @param _stakeRegistry Address of the stake registry contract
+    constructor(address _registryStateSender, address _stakeRegistry) Ownable() {
         GENESIS_BLOCK = uint64(block.number);
         REGISTRY_STATE_SENDER = _registryStateSender;
+        STAKE_REGISTRY = _stakeRegistry;
     }
 
     /// @notice Queues a state update
     /// @param updateType Type of update to queue
     /// @param data Encoded update data
-    function queueStateUpdate(MessageType updateType, bytes memory data) external {
+    function queueStateUpdate(MessageType updateType, bytes memory data) external onlyStakeRegistry {
         uint32 targetEpoch = getEffectiveEpoch();
         
         epochUpdates[targetEpoch].push(StateUpdate({
@@ -74,14 +89,14 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
     /// @notice Gets remaining blocks until next epoch
     /// @return uint64 Number of blocks until next epoch
     function blocksUntilNextEpoch() external view returns (uint64) {
-        if (block.number >= getNextEpochBlock()) return 0;
-        return getNextEpochBlock() - uint64(block.number);
+        if (block.number >= getNextEpochStartBlock()) return 0;
+        return getNextEpochStartBlock() - uint64(block.number);
     }
 
     /// @notice Gets remaining blocks until grace period
     /// @return uint64 Number of blocks until grace period starts
     function blocksUntilGracePeriod() external view returns (uint64) {
-        uint64 graceStart = getNextEpochBlock() - GRACE_PERIOD;
+        uint64 graceStart = getNextEpochStartBlock() - GRACE_PERIOD;
         if (block.number >= graceStart) return 0;
         return graceStart - uint64(block.number);
     }
@@ -131,7 +146,7 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
     /// @return bool True if current block is within grace period
     function isInGracePeriod() public view returns (bool) {
         uint256 currentBlock = block.number;
-        uint256 epochEndBlock = getNextEpochBlock();
+        uint256 epochEndBlock = getNextEpochStartBlock();
         return currentBlock >= epochEndBlock - GRACE_PERIOD;
     }
 
@@ -144,14 +159,14 @@ contract EpochManager is IEpochManager, OwnableUpgradeable {
 
     /// @notice Gets the start block of the current epoch
     /// @return uint64 The start block of the current epoch
-    function getCurrentEpochBlock() public view returns (uint64) {
+    function getCurrentEpochStartBlock() public view returns (uint64) {
         return GENESIS_BLOCK + (getCurrentEpoch() * EPOCH_LENGTH);
     }
 
-    /// @notice Gets the next epoch block
-    /// @return uint64 The next epoch block
-    function getNextEpochBlock() public view returns (uint64) {
-        return getCurrentEpochBlock() + EPOCH_LENGTH;
+    /// @notice Gets the next epoch start block
+    /// @return uint64 The next epoch start block
+    function getNextEpochStartBlock() public view returns (uint64) {
+        return getCurrentEpochStartBlock() + EPOCH_LENGTH;
     }
 
     /// @notice Gets the start block for a given epoch number

@@ -26,7 +26,7 @@ interface IRegistryStateReceiver is IAbridgeMessageHandler {
     error RegistryStateReceiver__UpdateRouteFailed();
     error RegistryStateReceiver__InvalidMessageType();
     error RegistryStateReceiver__BatchUpdateFailed();
-
+    error RegistryStateReceiver__MessageAlreadyProcessed();
     // Events
     event UpdateProcessed(uint256 indexed epoch, uint256 updatesCount);
 

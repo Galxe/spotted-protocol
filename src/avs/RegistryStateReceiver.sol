@@ -23,6 +23,8 @@ contract RegistryStateReceiver is IRegistryStateReceiver, Ownable {
     /// @notice The stake registry contract that receives state updates
     ILightStakeRegistry public immutable stakeRegistry;
 
+    /// @notice Mapping to track processed messages
+    mapping(bytes32 => bool) public processedMessages;
     /// @notice The current epoch number
     uint256 private currentEpoch;
 
@@ -68,9 +70,10 @@ contract RegistryStateReceiver is IRegistryStateReceiver, Ownable {
     function handleMessage(
         address from,
         bytes calldata message,
-        bytes32 /*guid*/
+        bytes32 guid
     ) external onlyAbridge returns (bytes4) {
         if (from != sender) revert RegistryStateReceiver__InvalidSender();
+        if (processedMessages[guid]) revert RegistryStateReceiver__MessageAlreadyProcessed();
 
         // decode epoch and updates
         (uint256 epoch, IEpochManager.StateUpdate[] memory updates) =
@@ -81,6 +84,7 @@ contract RegistryStateReceiver is IRegistryStateReceiver, Ownable {
 
         // process updates
         try stakeRegistry.processEpochUpdate(updates) {
+            processedMessages[guid] = true;
             emit UpdateProcessed(epoch, updates.length);
         } catch {
             revert RegistryStateReceiver__BatchUpdateFailed();

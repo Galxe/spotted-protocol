@@ -7,7 +7,9 @@ contract MockStateManager is IStateManager {
     bool public shouldRevert;
     mapping(bytes32 => History) private histories;
 
-    function setShouldRevert(bool _shouldRevert) external {
+    function setShouldRevert(
+        bool _shouldRevert
+    ) external {
         shouldRevert = _shouldRevert;
     }
 
@@ -29,7 +31,9 @@ contract MockStateManager is IStateManager {
         if (shouldRevert) revert("MockStateManager: setValue reverted");
     }
 
-    function batchSetValues(SetValueParams[] calldata params) external {
+    function batchSetValues(
+        SetValueParams[] calldata params
+    ) external {
         if (shouldRevert) revert("MockStateManager: batchSetValues reverted");
     }
 
@@ -89,4 +93,4 @@ contract MockStateManager is IStateManager {
         if (shouldRevert) revert("MockStateManager: getHistory reverted");
         revert("Not implemented");
     }
-} 
+}

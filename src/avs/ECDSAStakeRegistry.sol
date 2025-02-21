@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.27;
 
-import {ECDSAStakeRegistryStorage, Quorum, StrategyParams} from "./ECDSAStakeRegistryStorage.sol";
+import {
+    ECDSAStakeRegistryStorage, IECDSAStakeRegistryTypes
+} from "./ECDSAStakeRegistryStorage.sol";
 import {IStrategy} from "eigenlayer-contracts/src/contracts/interfaces/IStrategy.sol";
 import {IDelegationManager} from
     "eigenlayer-contracts/src/contracts/interfaces/IDelegationManager.sol";
 import {ISignatureUtils} from "eigenlayer-contracts/src/contracts/interfaces/ISignatureUtils.sol";
-import {IServiceManager} from "../interfaces/IServiceManager.sol";
-
+import {IServiceManager} from "../interfaces/ISpottedServiceManager.sol";
 import {OwnableUpgradeable} from "@openzeppelin-upgrades/contracts/access/OwnableUpgradeable.sol";
 import {CheckpointsUpgradeable} from
     "@openzeppelin-upgrades/contracts/utils/CheckpointsUpgradeable.sol";
@@ -15,8 +16,14 @@ import {SignatureCheckerUpgradeable} from
     "@openzeppelin-upgrades/contracts/utils/cryptography/SignatureCheckerUpgradeable.sol";
 import {IERC1271Upgradeable} from
     "@openzeppelin-upgrades/contracts/interfaces/IERC1271Upgradeable.sol";
-import {EpochCheckpointsUpgradeable} from "../libraries/EpochCheckpointsUpgradeable.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
+import {IAllocationManager} from
+    "eigenlayer-contracts/src/contracts/interfaces/IAllocationManager.sol";
+import {
+    OperatorSetLib,
+    OperatorSet
+} from "eigenlayer-contracts/src/contracts/libraries/OperatorSetLib.sol";
+import {IAVSDirectoryTypes} from "eigenlayer-contracts/src/contracts/interfaces/IAVSDirectory.sol";
 
 /// @title ECDSA Stake Registry
 /// @author Spotted Team
@@ -29,60 +36,122 @@ contract ECDSAStakeRegistry is
     ECDSAStakeRegistryStorage
 {
     using SignatureCheckerUpgradeable for address;
-    using EpochCheckpointsUpgradeable for EpochCheckpointsUpgradeable.History;
+    using OperatorSetLib for OperatorSet;
 
     /// @dev Constructor to create ECDSAStakeRegistry.
     /// @param _delegationManager Address of the DelegationManager contract that this registry interacts with.
     constructor(
         address _delegationManager,
         address _epochManager,
-        address _serviceManager
-    ) ECDSAStakeRegistryStorage(_delegationManager, _epochManager, _serviceManager) {
+        address _allocationManager,
+        address _avsRegistrar,
+        address _avsDirectory
+    )
+        ECDSAStakeRegistryStorage(
+            _delegationManager,
+            _epochManager,
+            _allocationManager,
+            _avsRegistrar,
+            _avsDirectory
+        )
+    {
         _disableInitializers();
     }
 
+    modifier onlyAVSRegistrar() {
+        if (msg.sender != address(avsRegistrar)) {
+            revert ECDSAStakeRegistry__InvalidSender();
+        }
+        _;
+    }
     /// @notice Initializes the contract with the given parameters.
     /// @param _thresholdWeight The threshold weight in basis points.
     /// @param quorumParams The quorum struct containing the details of the quorum thresholds.
+
     function initialize(
+        address _serviceManager,
         uint256 _thresholdWeight,
         Quorum memory quorumParams
     ) external initializer {
-        __ECDSAStakeRegistry_init(_thresholdWeight, quorumParams);
+        __ECDSAStakeRegistry_init(_serviceManager, _thresholdWeight, quorumParams);
+    }
+
+    function disableM2QuorumRegistration() external onlyOwner {
+        if (isM2QuorumRegistrationDisabled) {
+            revert ECDSAStakeRegistry__M2QuorumRegistrationIsDisabled();
+        }
+
+        isM2QuorumRegistrationDisabled = true;
+        emit M2QuorumRegistrationDisabled();
     }
 
     /// @notice Registers a new operator using a provided signature and signing key
     /// @param _operatorSignature Contains the operator's signature, salt, and expiry
     /// @param _signingKey The signing key to add to the operator's history
-    function registerOperatorWithSignature(
+    function registerOperatorOnAVSDirectory(
         ISignatureUtils.SignatureWithSaltAndExpiry memory _operatorSignature,
         address _signingKey,
         address _p2pKey
     ) external {
+        if (isM2QuorumRegistrationDisabled) {
+            revert ECDSAStakeRegistry__M2QuorumRegistrationIsDisabled();
+        }
+        if (operatorRegisteredOnAVSDirectory(msg.sender)) {
+            revert ECDSAStakeRegistry__OperatorAlreadyRegistered();
+        }
         _registerOperatorWithSig(msg.sender, _operatorSignature, _signingKey, _p2pKey);
 
-        // all the needed updated states to sync to other chains
-        address newSigningKey = _signingKey;
-        uint256 newWeight = _operatorWeightHistory[msg.sender].latest();
-        uint256 newTotalWeight = _totalWeightHistory.latest();
-
-        bytes memory data = abi.encode(msg.sender, newSigningKey, newWeight, newTotalWeight);
-
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.REGISTER, data);
+        // emit event if operator is not registered on current operator set (first time registration)
+        if (!operatorRegisteredOnCurrentOperatorSet(msg.sender)) {
+            emit OperatorRegistered(
+                msg.sender, block.number, _p2pKey, _signingKey, address(_serviceManager)
+            );
+        }
     }
 
     /// @notice Deregisters an existing operator
     /// @dev Only callable by the operator themselves
-    function deregisterOperator() external {
+    function deregisterOperatorOnAVSDirectory() external {
+        if (!operatorRegisteredOnAVSDirectory(msg.sender)) {
+            revert ECDSAStakeRegistry__OperatorNotRegistered();
+        }
+
         _deregisterOperator(msg.sender);
 
-        // all the needed updated states to sync to other chains
-        uint256 newWeight = _operatorWeightHistory[msg.sender].latest();
-        uint256 newTotalWeight = _totalWeightHistory.latest();
+        if (!operatorRegisteredOnCurrentOperatorSet(msg.sender)) {
+            emit OperatorDeregistered(msg.sender, block.number, address(_serviceManager));
+        }
+    }
 
-        bytes memory data = abi.encode(msg.sender, newWeight, newTotalWeight);
+    function onOperatorSetRegistered(
+        address operator,
+        address signingKey,
+        address p2pKey
+    ) external onlyAVSRegistrar {
+        // Update operator weight
+        _updateOperatorWeight(operator);
 
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.DEREGISTER, data);
+        // Update signing key and p2p key
+        _updateOperatorSigningKey(operator, signingKey);
+        _updateOperatorP2pKey(operator, p2pKey);
+
+        if (!operatorRegisteredOnAVSDirectory(operator)) {  
+            emit OperatorRegistered(
+                operator, block.number, p2pKey, signingKey, address(_serviceManager)
+            );
+        }
+    }
+
+    function onOperatorSetDeregistered(
+        address operator
+    ) external onlyAVSRegistrar {
+        // Update weights
+        _updateOperatorWeight(operator);
+
+        // Emit event
+        if (!operatorRegisteredOnAVSDirectory(operator)) {
+            emit OperatorDeregistered(operator, block.number, address(_serviceManager));
+        }
     }
 
     /// @notice Updates the signing key for an operator
@@ -91,13 +160,10 @@ contract ECDSAStakeRegistry is
     function updateOperatorSigningKey(
         address _newSigningKey
     ) external {
-        if (!_operatorRegistered[msg.sender]) {
-            revert OperatorNotRegistered();
+        if (!operatorRegistered(msg.sender)) {
+            revert ECDSAStakeRegistry__OperatorNotRegistered();
         }
         _updateOperatorSigningKey(msg.sender, _newSigningKey);
-
-        bytes memory data = abi.encode(msg.sender, _newSigningKey);
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_SIGNING_KEY, data);
     }
 
     /// @notice Updates the P2p key for an operator
@@ -106,13 +172,10 @@ contract ECDSAStakeRegistry is
     function updateOperatorP2pKey(
         address _newP2pKey
     ) external {
-        if (!_operatorRegistered[msg.sender]) {
-            revert OperatorNotRegistered();
+        if (!operatorRegistered(msg.sender)) {
+            revert ECDSAStakeRegistry__OperatorNotRegistered();
         }
         _updateOperatorP2pKey(msg.sender, _newP2pKey);
-
-        bytes memory data = abi.encode(msg.sender, _newP2pKey);
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_P2P_KEY, data);
     }
 
     /// @notice Updates the StakeRegistry's view of one or more operators' stakes adding a new entry in their history of stake checkpoints,
@@ -122,26 +185,6 @@ contract ECDSAStakeRegistry is
         address[] memory _operators
     ) external {
         _updateOperators(_operators);
-
-        // get updated operators' state
-        uint256 operatorsLength = _operators.length;
-        uint256[] memory newWeights = new uint256[](operatorsLength);
-        for (uint256 i = 0; i < operatorsLength;) {
-            newWeights[i] = _operatorWeightHistory[_operators[i]].latest();
-            unchecked {
-                ++i;
-            }
-        }
-        uint256 newTotalWeight = _totalWeightHistory.latest();
-
-        // pack all state updates to be synced
-        bytes memory data = abi.encode(
-            _operators, // operators need to be updated
-            newWeights, // new weights for each operator
-            newTotalWeight // new total weight
-        );
-
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_OPERATORS, data);
     }
 
     /// @notice Updates the quorum configuration and the set of operators
@@ -155,22 +198,6 @@ contract ECDSAStakeRegistry is
     ) external onlyOwner {
         _updateQuorumConfig(newQuorumConfig);
         _updateOperators(_operators);
-
-        // get updated operators' state
-        uint256[] memory newWeights = new uint256[](_operators.length);
-        for (uint256 i = 0; i < _operators.length; i++) {
-            newWeights[i] = _operatorWeightHistory[_operators[i]].latest();
-        }
-        uint256 newTotalWeight = _totalWeightHistory.latest();
-
-        bytes memory data = abi.encode(
-            newQuorumConfig, // new quorum config
-            _operators, // operators need to be updated
-            newWeights, // new weights for each operator
-            newTotalWeight // new total weight
-        );
-
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_QUORUM, data);
     }
 
     /// @notice Updates the weight an operator must have to join the operator set
@@ -182,22 +209,6 @@ contract ECDSAStakeRegistry is
     ) external onlyOwner {
         _updateMinimumWeight(_newMinimumWeight);
         _updateOperators(_operators);
-
-        // get updated operators' state
-        uint256[] memory newWeights = new uint256[](_operators.length);
-        for (uint256 i = 0; i < _operators.length; i++) {
-            newWeights[i] = _operatorWeightHistory[_operators[i]].latest();
-        }
-        uint256 newTotalWeight = _totalWeightHistory.latest();
-
-        bytes memory data = abi.encode(
-            _newMinimumWeight, // new minimum weight
-            _operators, // operators need to be updated
-            newWeights, // new weights for each operator
-            newTotalWeight // new total weight
-        );
-
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_MIN_WEIGHT, data);
     }
 
     /// @notice Sets a new cumulative threshold weight for message validation by operator set signatures.
@@ -210,39 +221,23 @@ contract ECDSAStakeRegistry is
         uint256 _thresholdWeight
     ) external onlyOwner {
         _updateStakeThreshold(_thresholdWeight);
-
-        bytes memory data = abi.encode(_thresholdWeight);
-
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_THRESHOLD, data);
     }
 
-    /// @notice Updates the set of operators for the first quorum.
-    /// @param operatorsPerQuorum An array of operator address arrays, one for each quorum.
-    /// @dev This interface maintains compatibility with avs-sync which handles multiquorums while this registry has a single quorum
-    function updateOperatorsForQuorum(
-        address[][] memory operatorsPerQuorum,
-        bytes memory
-    ) external {
-        address[] memory operators = operatorsPerQuorum[0];
-        uint256 operatorsLength = operators.length;
-        _updateAllOperators(operators);
+    function setCurrentOperatorSetId(
+        uint32 _id
+    ) external onlyOwner {
+        currentOperatorSetId = _id;
+    }
 
-        uint256[] memory newWeights = new uint256[](operatorsLength);
-        for (uint256 i = 0; i < operatorsLength;) {
-            newWeights[i] = _operatorWeightHistory[operators[i]].latest();
-            unchecked {
-                ++i;
-            }
-        }
-        uint256 newTotalWeight = _totalWeightHistory.latest();
-
-        bytes memory data = abi.encode(
-            operators, // operators need to be updated
-            newWeights, // new weights for each operator
-            newTotalWeight // new total weight
-        );
-
-        EPOCH_MANAGER.queueStateUpdate(IEpochManager.MessageType.UPDATE_OPERATORS_FOR_QUORUM, data);
+    function setAllocationManager(
+        address _allocationManager
+    ) external onlyOwner {
+        allocationManager = IAllocationManager(_allocationManager);
+    }
+    function setAVSRegistrar(
+        address _avsRegistrar
+    ) external onlyOwner {
+        avsRegistrar = _avsRegistrar;
     }
 
     /// @notice Validates a signature against ERC1271 interface
@@ -257,7 +252,7 @@ contract ECDSAStakeRegistry is
         (address[] memory operators, bytes[] memory signatures, uint32 referenceEpoch) =
             abi.decode(_signatureData, (address[], bytes[], uint32));
         if (referenceEpoch > EPOCH_MANAGER.getCurrentEpoch()) {
-            revert InvalidEpoch();
+            revert ECDSAStakeRegistry__InvalidEpoch();
         }
         _checkSignatures(_dataHash, operators, signatures, referenceEpoch);
         return IERC1271Upgradeable.isValidSignature.selector;
@@ -269,33 +264,19 @@ contract ECDSAStakeRegistry is
         return _quorum;
     }
 
-    /// @notice Gets the latest signing key for an operator
-    /// @param _operator Address of the operator to query
-    /// @return Latest signing key associated with the operator
-    function getLastestOperatorSigningKey(
-        address _operator
-    ) external view returns (address) {
-        return address(uint160(_operatorSigningKeyHistory[_operator].latest()));
-    }
-
-    /// @notice Gets the latest signing key for an operator
-    /// @param _operator Address of the operator to query
-    /// @return Latest signing key associated with the operator
-    function getLastestOperatorP2pKey(
-        address _operator
-    ) external view returns (address) {
-        return address(uint160(_operatorP2pKeyHistory[_operator].latest()));
+    function getCurrentOperatorSetId() external view returns (uint32) {
+        return currentOperatorSetId;
     }
 
     /// @notice Gets an operator's signing key at a specific epoch
     /// @param _operator Address of the operator to query
-    /// @param _epochNumber Epoch number to query the signing key for
+    /// @param _referenceEpoch Epoch number to query the signing key for
     /// @return Signing key that was active at the specified epoch
     function getOperatorSigningKeyAtEpoch(
         address _operator,
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (address) {
-        return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_epochNumber)));
+        return address(uint160(_operatorSigningKeyAtEpoch[_referenceEpoch][_operator]));
     }
 
     /// @notice Gets the latest P2p key for an operator
@@ -303,76 +284,38 @@ contract ECDSAStakeRegistry is
     /// @return Latest P2p key for the operator
     function getOperatorP2pKeyAtEpoch(
         address _operator,
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (address) {
-        return address(uint160(_operatorP2pKeyHistory[_operator].getAtEpoch(_epochNumber)));
-    }
-
-    /// @notice Gets the latest recorded weight for an operator
-    /// @param _operator Address of the operator to query
-    /// @return Latest weight checkpoint for the operator
-    function getLastCheckpointOperatorWeight(
-        address _operator
-    ) external view returns (uint256) {
-        return _operatorWeightHistory[_operator].latest();
-    }
-
-    /// @notice Gets the latest total weight across all operators
-    /// @return Latest total weight checkpoint
-    function getLastCheckpointTotalWeight() external view returns (uint256) {
-        return _totalWeightHistory.latest();
-    }
-
-    /// @notice Gets the latest threshold weight
-    /// @return Latest threshold weight checkpoint
-    function getLastCheckpointThresholdWeight() external view returns (uint256) {
-        return _thresholdWeightHistory.latest();
+        return address(uint160(_operatorP2pKeyAtEpoch[_referenceEpoch][_operator]));
     }
 
     /// @notice Gets an operator's weight at a specific epoch
     /// @param _operator Address of the operator to query
-    /// @param _epochNumber Epoch number to query the weight for
+    /// @param _referenceEpoch Epoch number to query the weight for
     /// @return Weight that was active at the specified epoch
     function getOperatorWeightAtEpoch(
         address _operator,
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (uint256) {
-        return _operatorWeightHistory[_operator].getAtEpoch(_epochNumber);
-    }
-
-    /// @notice Gets the total weight at a specific epoch
-    /// @param _epochNumber Epoch number to query
-    /// @return Total weight that was active at the specified epoch
-    function getTotalWeightAtEpoch(
-        uint32 _epochNumber
-    ) external view returns (uint256) {
-        return _totalWeightHistory.getAtEpoch(_epochNumber);
+        return _operatorWeightAtEpoch[_referenceEpoch][_operator];
     }
 
     /// @notice Gets the threshold weight at a specific epoch
-    /// @param _epochNumber Epoch number to query
+    /// @param _referenceEpoch Epoch number to query
     /// @return Threshold weight that was active at the specified epoch
     function getThresholdWeightAtEpoch(
-        uint32 _epochNumber
+        uint32 _referenceEpoch
     ) external view returns (uint256) {
-        return _thresholdWeightHistory.getAtEpoch(_epochNumber);
+        return _thresholdWeightAtEpoch[_referenceEpoch];
     }
 
-    /// @notice Gets the operator associated with a signing key
+    /// @notice Gets the operator address associated with a given signing key
     /// @param _signingKey The signing key to query
-    /// @return The operator associated with the signing key
+    /// @return The operator address associated with the signing key
     function getOperatorBySigningKey(
         address _signingKey
     ) external view returns (address) {
-        return _operatorToSigningKey[_signingKey];
-    }
-    /// @notice Checks if an operator is currently registered
-    /// @param _operator Address of the operator to check
-    /// @return True if operator is registered, false otherwise
-    function operatorRegistered(
-        address _operator
-    ) external view returns (bool) {
-        return _operatorRegistered[_operator];
+        return _signingKeyToOperator[_signingKey];
     }
 
     /// @notice Gets the minimum weight requirement for operators
@@ -381,6 +324,32 @@ contract ECDSAStakeRegistry is
         return _minimumWeight;
     }
 
+    function operatorRegisteredOnAVSDirectory(
+        address operator
+    ) public view returns (bool) {
+        return AVS_DIRECTORY.avsOperatorStatus(address(_serviceManager), operator)
+            == IAVSDirectoryTypes.OperatorAVSRegistrationStatus.REGISTERED;
+    }
+
+    function operatorRegisteredOnCurrentOperatorSet(
+        address operator
+    ) public view returns (bool) {
+        if (address(allocationManager) == address(0)) {
+            return false;
+        }
+        OperatorSet memory operatorSet =
+            OperatorSet({avs: address(_serviceManager), id: currentOperatorSetId});
+        return allocationManager.isMemberOfOperatorSet(operator, operatorSet);
+    }
+
+    function operatorRegistered(
+        address operator
+    ) public view returns (bool) {
+        return operatorRegisteredOnAVSDirectory(operator)
+            || operatorRegisteredOnCurrentOperatorSet(operator);
+    }
+
+
     /// @notice Calculates an operator's current weight based on their delegated stake
     /// @param _operator Address of the operator to calculate weight for
     /// @return Current weight of the operator (0 if below minimum threshold)
@@ -388,18 +357,106 @@ contract ECDSAStakeRegistry is
     function getOperatorWeight(
         address _operator
     ) public view returns (uint256) {
+        uint256 quorumWeight = getQuorumWeight(_operator);
+        uint256 operatorSetWeight = getOperatorSetWeight(_operator);
+
+        return quorumWeight + operatorSetWeight;
+    }
+
+    /// @notice Calculates operator's weight in the quorum
+    /// @dev Weight calculation:
+    ///      1. Get operator's shares for each strategy
+    ///      2. Multiply shares by strategy multiplier
+    ///      3. Sum up weighted shares and divide by BPS
+    ///      4. Return 0 if below minimum weight
+    /// @param operator The operator address to calculate weight for
+    /// @return The operator's weight in quorum, or 0 if below minimum
+    function getQuorumWeight(
+        address operator
+    ) public view returns (uint256) {
+        // Get strategy params from quorum
         StrategyParams[] memory strategyParams = _quorum.strategies;
         uint256 weight;
+
+        // Create strategy array for batch shares query
         IStrategy[] memory strategies = new IStrategy[](strategyParams.length);
         for (uint256 i; i < strategyParams.length; i++) {
             strategies[i] = strategyParams[i].strategy;
         }
-        uint256[] memory shares = DELEGATION_MANAGER.getOperatorShares(_operator, strategies);
+
+        // Get operator's shares for all strategies
+        uint256[] memory shares = DELEGATION_MANAGER.getOperatorShares(operator, strategies);
+
+        // Calculate weighted sum of shares
         for (uint256 i; i < strategyParams.length; i++) {
             weight += shares[i] * strategyParams[i].multiplier;
         }
+        // Divide by BPS to get final weight
         weight = weight / BPS;
 
+        // Return 0 if below minimum weight
+        if (weight >= _minimumWeight) {
+            return weight;
+        } else {
+            return 0;
+        }
+    }
+
+    /// @notice Calculates operator's available weight in current operator set
+    /// @dev Weight calculation:
+    ///      1. Check operator set membership
+    ///      2. Get shares and allocation for each strategy
+    ///      3. Calculate available proportion (currentMagnitude/maxMagnitude)
+    ///      4. Sum up available shares weighted by proportion
+    /// @param operator The operator address to calculate weight for
+    /// @return The operator's available weight in set, or 0 if below minimum
+    function getOperatorSetWeight(
+        address operator
+    ) public view returns (uint256) {
+        // Return 0 if allocation manager not set
+        if (address(allocationManager) == address(0)) {
+            return 0;
+        }
+
+        // Create operator set struct
+        OperatorSet memory operatorSet =
+            OperatorSet({avs: address(_serviceManager), id: currentOperatorSetId});
+
+        // Check operator set membership
+        if (!allocationManager.isMemberOfOperatorSet(operator, operatorSet)) {
+            return 0;
+        }
+
+        // Get strategies from operator set
+        IStrategy[] memory strategies = allocationManager.getStrategiesInOperatorSet(operatorSet);
+        if (strategies.length == 0) {
+            return 0;
+        }
+
+        // Get operator's shares for all strategies
+        uint256[] memory shares = DELEGATION_MANAGER.getOperatorShares(operator, strategies);
+
+        uint256 weight;
+
+        // Calculate available weight for each strategy
+        for (uint256 i = 0; i < strategies.length; i++) {
+            // Get allocation and max magnitude
+            IAllocationManager.Allocation memory allocation =
+                allocationManager.getAllocation(operator, operatorSet, strategies[i]);
+            uint64 maxMagnitude = allocationManager.getMaxMagnitude(operator, strategies[i]);
+
+            if (maxMagnitude == 0) {
+                continue;
+            }
+
+            // Calculate available proportion
+            uint256 slashableProportion = uint256(allocation.currentMagnitude) * WAD / maxMagnitude;
+
+            // Add weighted shares to total
+            weight += shares[i] * slashableProportion / WAD;
+        }
+
+        // Return 0 if below minimum weight
         if (weight >= _minimumWeight) {
             return weight;
         } else {
@@ -414,31 +471,21 @@ contract ECDSAStakeRegistry is
     function getThresholdStake(
         uint32 _referenceEpoch
     ) external view returns (uint256) {
-        return _thresholdWeightHistory.getAtEpoch(_referenceEpoch);
+        return _thresholdWeightAtEpoch[_referenceEpoch];
     }
 
     /// @notice Initializes state for the StakeRegistry
     /// @param _thresholdWeight The threshold weight for the stake registry
     /// @param quorumParams The quorum configuration for the stake registry
     function __ECDSAStakeRegistry_init(
+        address _serviceManagerAddress,
         uint256 _thresholdWeight,
         Quorum memory quorumParams
     ) internal onlyInitializing {
+        _serviceManager = _serviceManagerAddress;
         _updateStakeThreshold(_thresholdWeight);
         _updateQuorumConfig(quorumParams);
         __Ownable_init();
-    }
-
-    /// @dev Updates the list of operators if the provided list has the correct number of operators.
-    /// Reverts if the provided list of operators does not match the expected total count of operators.
-    /// @param _operators The list of operator addresses to update.
-    function _updateAllOperators(
-        address[] memory _operators
-    ) internal {
-        if (_operators.length != _totalOperators) {
-            revert MustUpdateAllOperators();
-        }
-        _updateOperators(_operators);
     }
 
     /// @dev Updates the weights for a given list of operator addresses.
@@ -447,11 +494,9 @@ contract ECDSAStakeRegistry is
     function _updateOperators(
         address[] memory _operators
     ) internal {
-        int256 delta;
         for (uint256 i; i < _operators.length; i++) {
-            delta += _updateOperatorWeight(_operators[i]);
+            _updateOperatorWeight(_operators[i]);
         }
-        _updateTotalWeight(delta);
     }
 
     /// @dev Updates the stake threshold weight and records the history.
@@ -459,7 +504,8 @@ contract ECDSAStakeRegistry is
     function _updateStakeThreshold(
         uint256 _thresholdWeight
     ) internal {
-        _thresholdWeightHistory.push(_thresholdWeight);
+        uint32 effectiveEpoch = IEpochManager(EPOCH_MANAGER).getEffectiveEpoch();
+        _thresholdWeightAtEpoch[effectiveEpoch] = _thresholdWeight;
         emit ThresholdWeightUpdated(_thresholdWeight);
     }
 
@@ -482,7 +528,7 @@ contract ECDSAStakeRegistry is
         Quorum memory _newQuorum
     ) internal {
         if (!_isValidQuorum(_newQuorum)) {
-            revert InvalidQuorum();
+            revert ECDSAStakeRegistry__InvalidQuorum();
         }
         Quorum memory oldQuorum = _quorum;
         delete _quorum;
@@ -490,22 +536,6 @@ contract ECDSAStakeRegistry is
             _quorum.strategies.push(_newQuorum.strategies[i]);
         }
         emit QuorumUpdated(oldQuorum, _newQuorum);
-    }
-
-    /// @dev Internal function to deregister an operator
-    /// @param _operator The operator's address to deregister
-    function _deregisterOperator(
-        address _operator
-    ) internal {
-        if (!_operatorRegistered[_operator]) {
-            revert OperatorNotRegistered();
-        }
-        _totalOperators--;
-        delete _operatorRegistered[_operator];
-        int256 delta = _updateOperatorWeight(_operator);
-        _updateTotalWeight(delta);
-        SERVICE_MANAGER.deregisterOperatorFromAVS(_operator);
-        emit OperatorDeregistered(_operator, block.number, address(SERVICE_MANAGER));
     }
 
     /// @dev registers an operator through a provided signature
@@ -517,34 +547,40 @@ contract ECDSAStakeRegistry is
         address _signingKey,
         address _p2pKey
     ) internal virtual {
-        if (_operatorRegistered[_operator]) {
-            revert OperatorAlreadyRegistered();
-        }
-        _totalOperators++;
-        _operatorRegistered[_operator] = true;
-        int256 delta = _updateOperatorWeight(_operator);
-        _updateTotalWeight(delta);
+        _updateOperatorWeight(_operator);
         _updateOperatorSigningKey(_operator, _signingKey);
         _updateOperatorP2pKey(_operator, _p2pKey);
-        SERVICE_MANAGER.registerOperatorToAVS(_operator, _operatorSignature);
-        emit OperatorRegistered(
-            _operator, block.number, _p2pKey, _signingKey, address(SERVICE_MANAGER)
-        );
+        IServiceManager(_serviceManager).registerOperatorToAVS(_operator, _operatorSignature);
+    }
+
+    /// @dev Internal function to deregister an operator
+    /// @param _operator The operator's address to deregister
+    function _deregisterOperator(
+        address _operator
+    ) internal {
+        _updateOperatorWeight(_operator);
+        IServiceManager(_serviceManager).deregisterOperatorFromAVS(_operator);
     }
 
     /// @dev Internal function to update an operator's signing key
     /// @param _operator The address of the operator to update the signing key for
     /// @param _newSigningKey The new signing key to set for the operator
     function _updateOperatorSigningKey(address _operator, address _newSigningKey) internal {
-        address oldSigningKey = address(uint160(_operatorSigningKeyHistory[_operator].latest()));
-        if (_newSigningKey == oldSigningKey) {
+        uint32 effectiveEpoch = IEpochManager(EPOCH_MANAGER).getEffectiveEpoch();
+        address oldSigningKey = _operatorSigningKeyAtEpoch[effectiveEpoch][_operator];
+
+        // if the signing key is already set in this epoch, then return
+        if (oldSigningKey != address(0) || _newSigningKey == oldSigningKey) {
             return;
         }
-        if (_operatorToSigningKey[_operator] != address(0)) {
-            revert SigningKeyAlreadySet();
+        _operatorSigningKeyAtEpoch[effectiveEpoch][_operator] = _newSigningKey;
+
+        // if the signing key is already set for another operator, then revert
+        if (_signingKeyToOperator[_newSigningKey] != address(0) && _signingKeyToOperator[_newSigningKey] != _operator) {
+            revert ECDSAStakeRegistry__SigningKeyAlreadySet();
         }
-        _operatorSigningKeyHistory[_operator].push(uint160(_newSigningKey));
-        _operatorToSigningKey[_operator] = _newSigningKey;
+        _signingKeyToOperator[_newSigningKey] = _operator;
+
         emit SigningKeyUpdate(_operator, _newSigningKey, oldSigningKey);
     }
 
@@ -552,11 +588,15 @@ contract ECDSAStakeRegistry is
     /// @param _operator The address of the operator to update the P2p key for
     /// @param _newP2pKey The new P2p key to set for the operator
     function _updateOperatorP2pKey(address _operator, address _newP2pKey) internal {
-        address oldP2pKey = address(uint160(_operatorP2pKeyHistory[_operator].latest()));
-        if (_newP2pKey == oldP2pKey) {
+        uint32 effectiveEpoch = IEpochManager(EPOCH_MANAGER).getEffectiveEpoch();
+
+        // if p2p key is set for this epoch, or the new p2p key is the same as the old one, then return
+        address oldP2pKey = _operatorP2pKeyAtEpoch[effectiveEpoch][_operator];
+        if (oldP2pKey != address(0) || _newP2pKey == oldP2pKey) {
             return;
         }
-        _operatorP2pKeyHistory[_operator].push(uint160(_newP2pKey));
+
+        _operatorP2pKeyAtEpoch[effectiveEpoch][_operator] = _newP2pKey;
         emit P2pKeyUpdate(_operator, _newP2pKey, oldP2pKey);
     }
 
@@ -564,40 +604,11 @@ contract ECDSAStakeRegistry is
     /// @param _operator The address of the operator to update the weight of.
     function _updateOperatorWeight(
         address _operator
-    ) internal virtual returns (int256) {
-        int256 delta;
-        uint256 newWeight;
-        uint256 oldWeight = _operatorWeightHistory[_operator].latest();
-        if (!_operatorRegistered[_operator]) {
-            delta -= int256(oldWeight);
-            if (delta == 0) {
-                return delta;
-            }
-            _operatorWeightHistory[_operator].push(0);
-        } else {
-            newWeight = getOperatorWeight(_operator);
-            delta = int256(newWeight) - int256(oldWeight);
-            if (delta == 0) {
-                return delta;
-            }
-            _operatorWeightHistory[_operator].push(newWeight);
-        }
-        emit OperatorWeightUpdated(_operator, oldWeight, newWeight);
-        return delta;
-    }
-
-    /// @dev Internal function to update the total weight of the stake
-    /// @param delta The change in stake applied last total weight
-    /// @return oldTotalWeight The weight before the update
-    /// @return newTotalWeight The updated weight after applying the delta
-    function _updateTotalWeight(
-        int256 delta
-    ) internal returns (uint256 oldTotalWeight, uint256 newTotalWeight) {
-        oldTotalWeight = _totalWeightHistory.latest();
-        int256 newWeight = int256(oldTotalWeight) + delta;
-        newTotalWeight = uint256(newWeight);
-        _totalWeightHistory.push(newTotalWeight);
-        emit TotalWeightUpdated(oldTotalWeight, newTotalWeight);
+    ) internal virtual {
+        uint32 effectiveEpoch = IEpochManager(EPOCH_MANAGER).getEffectiveEpoch();
+        uint256 newWeight = getOperatorWeight(_operator);
+        _operatorWeightAtEpoch[effectiveEpoch][_operator] = newWeight;
+        emit OperatorWeightUpdated(_operator, newWeight);
     }
 
     /// @dev Verifies that a specified quorum configuration is valid. A valid quorum has:
@@ -614,7 +625,7 @@ contract ECDSAStakeRegistry is
         uint256 totalMultiplier;
         for (uint256 i; i < strategies.length; i++) {
             currentStrategy = address(strategies[i].strategy);
-            if (lastStrategy >= currentStrategy) revert NotSorted();
+            if (lastStrategy >= currentStrategy) revert ECDSAStakeRegistry__NotSorted();
             lastStrategy = currentStrategy;
             totalMultiplier += strategies[i].multiplier;
         }
@@ -646,13 +657,13 @@ contract ECDSAStakeRegistry is
 
         for (uint256 i; i < signersLength; i++) {
             currentOperator = _operators[i];
-            signer = _getOperatorSigningKey(currentOperator, _referenceEpoch);
+            signer = _getOperatorSigningKeyAtEpoch(currentOperator, _referenceEpoch);
 
             _validateSortedSigners(lastOperator, currentOperator);
             _validateSignature(signer, _dataHash, _signatures[i]);
 
             lastOperator = currentOperator;
-            uint256 operatorWeight = _getOperatorWeight(currentOperator, _referenceEpoch);
+            uint256 operatorWeight = _getOperatorWeightAtEpoch(currentOperator, _referenceEpoch);
             signedWeight += operatorWeight;
         }
 
@@ -667,10 +678,10 @@ contract ECDSAStakeRegistry is
         uint256 _signaturesLength
     ) internal pure {
         if (_signersLength != _signaturesLength) {
-            revert LengthMismatch();
+            revert ECDSAStakeRegistry__LengthMismatch();
         }
         if (_signersLength == 0) {
-            revert InvalidLength();
+            revert ECDSAStakeRegistry__InvalidLength();
         }
     }
 
@@ -679,7 +690,7 @@ contract ECDSAStakeRegistry is
     /// @param _currentSigner The address of the current signer.
     function _validateSortedSigners(address _lastSigner, address _currentSigner) internal pure {
         if (_lastSigner >= _currentSigner) {
-            revert NotSorted();
+            revert ECDSAStakeRegistry__NotSorted();
         }
     }
 
@@ -693,7 +704,7 @@ contract ECDSAStakeRegistry is
         bytes memory _signature
     ) internal view {
         if (!_signer.isValidSignatureNow(_dataHash, _signature)) {
-            revert InvalidSignature();
+            revert ECDSAStakeRegistry__InvalidSignature();
         }
     }
 
@@ -701,55 +712,41 @@ contract ECDSAStakeRegistry is
     /// @param _operator The operator to query their signing key history for
     /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
     /// @return The weight of the operator.
-    function _getOperatorSigningKey(
+    function _getOperatorSigningKeyAtEpoch(
         address _operator,
         uint32 _referenceEpoch
     ) internal view returns (address) {
-        return address(uint160(_operatorSigningKeyHistory[_operator].getAtEpoch(_referenceEpoch)));
+        return _operatorSigningKeyAtEpoch[_referenceEpoch][_operator];
     }
 
     /// @notice Retrieves the operator weight for a signer, either at the last checkpoint or a specified epoch.
     /// @param _operator The operator to query their signing key history for
     /// @param _referenceEpoch The epoch number to query the operator's weight at, or the maximum uint32 value for the last checkpoint.
     /// @return The weight of the operator.
-    function _getOperatorWeight(
+    function _getOperatorWeightAtEpoch(
         address _operator,
         uint32 _referenceEpoch
     ) internal view returns (uint256) {
-        return _operatorWeightHistory[_operator].getAtEpoch(_referenceEpoch);
-    }
-
-    /// @notice Retrieve the total stake weight at a specific epoch or the latest if not specified.
-    /// @dev If the `_referenceEpoch` is the maximum value for uint32, the latest total weight is returned.
-    /// @param _referenceEpoch The epoch number to retrieve the total stake weight from.
-    /// @return The total stake weight at the given epoch or the latest if the given epoch is the max uint32 value.
-    function _getTotalWeight(
-        uint32 _referenceEpoch
-    ) internal view returns (uint256) {
-        return _totalWeightHistory.getAtEpoch(_referenceEpoch);
+        return _operatorWeightAtEpoch[_referenceEpoch][_operator];
     }
 
     /// @notice Retrieves the threshold stake for a given reference epoch.
     /// @param _referenceEpoch The epoch number to query the threshold stake for.
     /// If set to the maximum uint32 value, it retrieves the latest threshold stake.
     /// @return The threshold stake in basis points for the reference epoch.
-    function _getThresholdStake(
+    function _getThresholdWeightAtEpoch(
         uint32 _referenceEpoch
     ) internal view returns (uint256) {
-        return _thresholdWeightHistory.getAtEpoch(_referenceEpoch);
+        return _thresholdWeightAtEpoch[_referenceEpoch];
     }
 
     /// @notice Validates that the cumulative stake of signed messages meets or exceeds the required threshold.
     /// @param _signedWeight The cumulative weight of the signers that have signed the message.
     /// @param _referenceEpoch The epoch number to verify the stake threshold for
     function _validateThresholdStake(uint256 _signedWeight, uint32 _referenceEpoch) internal view {
-        uint256 totalWeight = _getTotalWeight(_referenceEpoch);
-        if (_signedWeight > totalWeight) {
-            revert InvalidSignedWeight();
-        }
-        uint256 thresholdStake = _getThresholdStake(_referenceEpoch);
-        if (thresholdStake > _signedWeight) {
-            revert InsufficientSignedStake();
+        uint256 thresholdWeight = _getThresholdWeightAtEpoch(_referenceEpoch);
+        if (thresholdWeight > _signedWeight) {
+            revert ECDSAStakeRegistry__InsufficientSignedStake();
         }
     }
 }

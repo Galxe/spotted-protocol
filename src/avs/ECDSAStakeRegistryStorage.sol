@@ -3,62 +3,65 @@ pragma solidity ^0.8.26;
 
 import {IDelegationManager} from
     "eigenlayer-contracts/src/contracts/interfaces/IDelegationManager.sol";
-import {EpochCheckpointsUpgradeable} from "../libraries/EpochCheckpointsUpgradeable.sol";
 import {
-    ECDSAStakeRegistryEventsAndErrors,
-    Quorum,
-    StrategyParams
-} from "../interfaces/IECDSAStakeRegistryEventsAndErrors.sol";
+    IECDSAStakeRegistry, IECDSAStakeRegistryTypes
+} from "../interfaces/IECDSAStakeRegistry.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
-import {IServiceManager} from "../interfaces/IServiceManager.sol";
-
-abstract contract ECDSAStakeRegistryStorage is ECDSAStakeRegistryEventsAndErrors {
+import {IServiceManager} from "../interfaces/ISpottedServiceManager.sol";
+import {IAllocationManager} from
+    "eigenlayer-contracts/src/contracts/interfaces/IAllocationManager.sol";
+import {IAVSRegistrar} from "eigenlayer-contracts/src/contracts/interfaces/IAVSRegistrar.sol";
+import {IAVSDirectory} from "eigenlayer-contracts/src/contracts/interfaces/IAVSDirectory.sol";
+abstract contract ECDSAStakeRegistryStorage is IECDSAStakeRegistry {
     /// @notice Manages staking delegations through the DelegationManager interface
     IDelegationManager internal immutable DELEGATION_MANAGER;
     IEpochManager internal immutable EPOCH_MANAGER;
-    IServiceManager internal immutable SERVICE_MANAGER;
-
+    IAllocationManager internal allocationManager;
+    address internal avsRegistrar;
+    IAVSDirectory internal immutable AVS_DIRECTORY;
     /// @dev The total amount of multipliers to weigh stakes
     uint256 internal constant BPS = 10_000;
 
-    /// @notice The size of the current operator set
-    uint256 internal _totalOperators;
+    /// @notice Holds the address of the service manager
+    address internal _serviceManager;
+
+    /// @notice Whether M2 quorum registration is disabled
+    bool public isM2QuorumRegistrationDisabled;
 
     /// @notice Stores the current quorum configuration
     Quorum internal _quorum;
 
+    /// @notice The current operator set id
+    uint32 internal currentOperatorSetId;
+
+    uint256 public constant WAD = 1e18;
+
     /// @notice Specifies the weight required to become an operator
     uint256 internal _minimumWeight;
 
-    /// @notice Defines the duration after which the stake's weight expires.
-    uint256 internal _stakeExpiry;
-
-    /// @notice Maps an operator to their signing key history using checkpoints
-    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorSigningKeyHistory;
-    
-    /// @notice Tracks the total stake history over time using checkpoints
-    EpochCheckpointsUpgradeable.History internal _totalWeightHistory;
 
     /// @notice Tracks the threshold bps history using checkpoints
-    EpochCheckpointsUpgradeable.History internal _thresholdWeightHistory;
+    mapping(uint32 epochNumber => uint256 thresholdWeight) internal _thresholdWeightAtEpoch;
 
     /// @notice Maps operator addresses to their respective stake histories using checkpoints
-    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorWeightHistory;
-
-    /// @notice Maps an operator to their registration status
-    mapping(address => bool) internal _operatorRegistered;
+    mapping(uint32 epochNumber => mapping(address operator => uint256 operatorWeight)) internal _operatorWeightAtEpoch;
 
     /// @notice Maps an operator to their signing key
-    mapping(address => address) internal _operatorToSigningKey;
+    mapping(uint32 epochNumber => mapping(address operator => address signingKey)) internal _operatorSigningKeyAtEpoch;
+
+    /// @notice Maps a signing key to an operator
+    mapping(address signingKey => address operator) internal _signingKeyToOperator;
 
     /// @notice Maps an operator to their P2p key history using checkpoints
-    mapping(address => EpochCheckpointsUpgradeable.History) internal _operatorP2pKeyHistory;
+    mapping(uint32 epochNumber => mapping(address operator => address p2pKey)) internal _operatorP2pKeyAtEpoch;
 
     /// @param _delegationManager Connects this registry with the DelegationManager
-    constructor(address _delegationManager, address _epochManager, address _serviceManager) {
+    constructor(address _delegationManager, address _epochManager, address _allocationManager, address _avsRegistrar, address _avsDirectory) {
         DELEGATION_MANAGER = IDelegationManager(_delegationManager);
         EPOCH_MANAGER = IEpochManager(_epochManager);
-        SERVICE_MANAGER = IServiceManager(_serviceManager);
+        allocationManager = IAllocationManager(_allocationManager);
+        avsRegistrar = _avsRegistrar;
+        AVS_DIRECTORY = IAVSDirectory(_avsDirectory);
     }
 
     // slither-disable-next-line shadowing-state

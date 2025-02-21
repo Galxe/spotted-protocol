@@ -40,7 +40,9 @@ contract StateManager is IStateManager {
     /// @notice Sets multiple values in a single transaction
     /// @param params Array of key-value pairs to set
     /// @dev Enforces MAX_BATCH_SIZE limit
-    function batchSetValues(SetValueParams[] calldata params) external {
+    function batchSetValues(
+        SetValueParams[] calldata params
+    ) external {
         uint256 length = params.length;
         if (length > MAX_BATCH_SIZE) {
             revert StateManager__BatchTooLarge();
@@ -48,7 +50,7 @@ contract StateManager is IStateManager {
 
         for (uint256 i = 0; i < length;) {
             SetValueParams calldata param = params[i];
-            
+
             // add history record
             History[] storage keyHistory = histories[msg.sender][param.key];
 
@@ -136,9 +138,10 @@ contract StateManager is IStateManager {
         }
 
         // check if the range is valid and contains records
-        if (startIndex > endIndex || 
-            keyHistory[startIndex].blockNumber >= toBlock ||
-            keyHistory[endIndex].blockNumber < fromBlock) {
+        if (
+            startIndex > endIndex || keyHistory[startIndex].blockNumber >= toBlock
+                || keyHistory[endIndex].blockNumber < fromBlock
+        ) {
             revert StateManager__NoHistoryFound();
         }
 

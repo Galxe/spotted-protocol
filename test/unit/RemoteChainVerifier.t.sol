@@ -3,7 +3,11 @@ pragma solidity ^0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {RemoteChainVerifier} from "../../src/verifier/RemoteChainVerifier.sol";
-import {IRemoteChainVerifier} from "../../src/interfaces/IRemoteChainVerifier.sol";
+import {
+    IRemoteChainVerifier,
+    IRemoteChainVerifierErrors,
+    IRemoteChainVerifierEvents
+} from "../../src/interfaces/IRemoteChainVerifier.sol";
 import {IStateManager} from "../../src/interfaces/IStateManager.sol";
 import {MockAbridge} from "../mock/MockAbridge.sol";
 import {MockStateManager} from "../mock/MockStateManager.sol";
@@ -28,11 +32,7 @@ contract RemoteChainVerifierTest is Test {
 
         vm.prank(owner);
         verifier = new RemoteChainVerifier(
-            address(mockBridge),
-            address(mockStateManager),
-            MAIN_CHAIN_ID,
-            mainChainVerifier,
-            owner
+            address(mockBridge), address(mockStateManager), MAIN_CHAIN_ID, mainChainVerifier, owner
         );
 
         // Authorize verifier as sender
@@ -51,48 +51,32 @@ contract RemoteChainVerifierTest is Test {
 
     function test_Constructor_RevertIfInvalidBridge() public {
         vm.prank(owner);
-        vm.expectRevert(IRemoteChainVerifier.RemoteChainVerifier__InvalidResponse.selector);
+        vm.expectRevert(IRemoteChainVerifierErrors.RemoteChainVerifier__InvalidResponse.selector);
         new RemoteChainVerifier(
-            address(0),
-            address(mockStateManager),
-            MAIN_CHAIN_ID,
-            mainChainVerifier,
-            owner
+            address(0), address(mockStateManager), MAIN_CHAIN_ID, mainChainVerifier, owner
         );
     }
 
     function test_Constructor_RevertIfInvalidMainChainId() public {
         vm.prank(owner);
-        vm.expectRevert(IRemoteChainVerifier.RemoteChainVerifier__InvalidMainChainId.selector);
+        vm.expectRevert(IRemoteChainVerifierErrors.RemoteChainVerifier__InvalidMainChainId.selector);
         new RemoteChainVerifier(
-            address(mockBridge),
-            address(mockStateManager),
-            0,
-            mainChainVerifier,
-            owner
+            address(mockBridge), address(mockStateManager), 0, mainChainVerifier, owner
         );
     }
 
     function test_Constructor_RevertIfInvalidMainChainVerifier() public {
         vm.prank(owner);
-        vm.expectRevert(IRemoteChainVerifier.RemoteChainVerifier__InvalidResponse.selector);
+        vm.expectRevert(IRemoteChainVerifierErrors.RemoteChainVerifier__InvalidResponse.selector);
         new RemoteChainVerifier(
-            address(mockBridge),
-            address(mockStateManager),
-            MAIN_CHAIN_ID,
-            address(0),
-            owner
+            address(mockBridge), address(mockStateManager), MAIN_CHAIN_ID, address(0), owner
         );
     }
 
     function test_Constructor_AllowZeroStateManager() public {
         vm.prank(owner);
         RemoteChainVerifier newVerifier = new RemoteChainVerifier(
-            address(mockBridge),
-            address(0),
-            MAIN_CHAIN_ID,
-            mainChainVerifier,
-            owner
+            address(mockBridge), address(0), MAIN_CHAIN_ID, mainChainVerifier, owner
         );
 
         assertEq(address(newVerifier.stateManager()), address(0));
@@ -115,21 +99,15 @@ contract RemoteChainVerifierTest is Test {
         mockBridge.setFee(fee);
 
         // Should revert if insufficient fee
-        vm.expectRevert(IRemoteChainVerifier.RemoteChainVerifier__InsufficientFee.selector);
+        vm.expectRevert(IRemoteChainVerifierErrors.RemoteChainVerifier__InsufficientFee.selector);
         verifier.verifyState(user, key, blockNumber);
 
         // Should succeed with sufficient fee
-        bytes memory expectedMessage = abi.encode(
-            MAIN_CHAIN_ID,
-            user,
-            key,
-            blockNumber,
-            value,
-            true
-        );
+        bytes memory expectedMessage =
+            abi.encode(MAIN_CHAIN_ID, user, key, blockNumber, value, true);
 
         vm.expectEmit(true, true, true, true);
-        emit IRemoteChainVerifier.VerificationProcessed(user, key, blockNumber, value);
+        emit IRemoteChainVerifierEvents.VerificationProcessed(user, key, blockNumber, value);
 
         verifier.verifyState{value: fee}(user, key, blockNumber);
 
@@ -144,14 +122,10 @@ contract RemoteChainVerifierTest is Test {
         // Deploy verifier without state manager
         vm.prank(owner);
         RemoteChainVerifier newVerifier = new RemoteChainVerifier(
-            address(mockBridge),
-            address(0),
-            MAIN_CHAIN_ID,
-            mainChainVerifier,
-            owner
+            address(mockBridge), address(0), MAIN_CHAIN_ID, mainChainVerifier, owner
         );
 
-        vm.expectRevert(IRemoteChainVerifier.RemoteChainVerifier__StateManagerNotSet.selector);
+        vm.expectRevert(IRemoteChainVerifierErrors.RemoteChainVerifier__StateManagerNotSet.selector);
         newVerifier.verifyState(makeAddr("user"), 1, 100);
     }
 
@@ -159,12 +133,12 @@ contract RemoteChainVerifierTest is Test {
         address user = makeAddr("user");
         uint256 key = 1;
         uint256 currentBlock = 100;
-        
+
         // Set current block
         vm.roll(currentBlock);
 
         // Try to verify future block
-        vm.expectRevert(IRemoteChainVerifier.RemoteChainVerifier__BlockNumberTooHigh.selector);
+        vm.expectRevert(IRemoteChainVerifierErrors.RemoteChainVerifier__BlockNumberTooHigh.selector);
         verifier.verifyState(user, key, currentBlock + 1);
     }
-} 
+}

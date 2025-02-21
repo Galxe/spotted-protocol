@@ -6,7 +6,10 @@ import {IAbridge} from "../interfaces/IAbridge.sol";
 import {Ownable} from "@openzeppelin-v5.0.0/contracts/access/Ownable.sol";
 import {ILightStakeRegistry} from "../interfaces/ILightStakeRegistry.sol";
 import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
-import {ECDSAStakeRegistryStorage, Quorum} from "../avs/ECDSAStakeRegistryStorage.sol";
+import {
+    ECDSAStakeRegistryStorage,
+    IECDSAStakeRegistryTypes
+} from "../avs/ECDSAStakeRegistryStorage.sol";
 import {IEpochManager} from "../interfaces/IEpochManager.sol";
 
 /// @title Registry State Receiver
@@ -26,12 +29,12 @@ contract RegistryStateReceiver is IRegistryStateReceiver, Ownable {
     /// @notice Mapping to track processed messages
     mapping(bytes32 => bool) public processedMessages;
     /// @notice The current epoch number
-    uint256 private currentEpoch;
+    uint256 private currentUpdatingEpoch;
 
     /// @notice Retrieves the current epoch number
     /// @return The current epoch number
-    function getCurrentEpoch() external view returns (uint256) {
-        return currentEpoch;
+    function getCurrentUpdatingEpoch() external view returns (uint256) {
+        return currentUpdatingEpoch;
     }
 
     /// @notice Ensures only the bridge contract can call certain functions
@@ -75,17 +78,14 @@ contract RegistryStateReceiver is IRegistryStateReceiver, Ownable {
         if (from != sender) revert RegistryStateReceiver__InvalidSender();
         if (processedMessages[guid]) revert RegistryStateReceiver__MessageAlreadyProcessed();
 
-        // decode epoch and updates
-        (uint256 epoch, IEpochManager.StateUpdate[] memory updates) =
-            abi.decode(message, (uint256, IEpochManager.StateUpdate[]));
+        (uint32 epochNumber, address[] memory operators,,,) = abi.decode(message, (uint32, address[], address[], uint256[], uint256));
 
-        // update current epoch
-        currentEpoch = epoch;
+        currentUpdatingEpoch = epochNumber;
 
-        // process updates
-        try stakeRegistry.processEpochUpdate(updates) {
+        // send to LightStakeRegistry
+        try stakeRegistry.processEpochUpdate(message) {
             processedMessages[guid] = true;
-            emit UpdateProcessed(epoch, updates.length);
+            emit UpdateProcessed(epochNumber, operators.length);
         } catch {
             revert RegistryStateReceiver__BatchUpdateFailed();
         }

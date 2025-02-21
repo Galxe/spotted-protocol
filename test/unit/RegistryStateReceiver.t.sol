@@ -3,8 +3,10 @@ pragma solidity ^0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {RegistryStateReceiver} from "../../src/avs/RegistryStateReceiver.sol";
-import {IRegistryStateReceiver} from "../../src/interfaces/IRegistryStateReceiver.sol";
-import {IEpochManager} from "../../src/interfaces/IEpochManager.sol";
+import {
+    IRegistryStateReceiver,
+    IRegistryStateReceiverErrors
+} from "../../src/interfaces/IRegistryStateReceiver.sol";
 import {MockAbridge} from "../mock/MockAbridge.sol";
 import {MockLightStakeRegistry} from "../mock/MockLightStakeRegistry.sol";
 import {Ownable} from "@openzeppelin-v5.0.0/contracts/access/Ownable.sol";
@@ -22,21 +24,21 @@ contract RegistryStateReceiverTest is Test {
     function setUp() public {
         owner = makeAddr("owner");
         sender = makeAddr("sender");
-        
+
         // Deploy mock contracts
         mockBridge = new MockAbridge();
         mockStakeRegistry = new MockLightStakeRegistry();
 
         vm.prank(owner);
         stateReceiver = new RegistryStateReceiver(
-            address(mockBridge),
-            sender,
-            address(mockStakeRegistry),
+            address(mockBridge), 
+            sender, 
+            address(mockStakeRegistry), 
             owner
         );
     }
 
-    function test_Constructor() public view {
+    function test_Constructor() public {
         assertEq(address(stateReceiver.abridge()), address(mockBridge));
         assertEq(stateReceiver.sender(), sender);
         assertEq(address(stateReceiver.stakeRegistry()), address(mockStakeRegistry));
@@ -45,22 +47,32 @@ contract RegistryStateReceiverTest is Test {
 
     function test_HandleMessage() public {
         // Create test data
-        IEpochManager.StateUpdate[] memory updates = new IEpochManager.StateUpdate[](1);
-        updates[0] = IEpochManager.StateUpdate({
-            updateType: IEpochManager.MessageType.REGISTER,
-            data: "test"
-        });
-        
-        bytes memory message = abi.encode(1, updates); // epoch 1
+        uint32 epochNumber = 1;
+        address[] memory operators = new address[](1);
+        address[] memory signingKeys = new address[](1);
+        uint256[] memory weights = new uint256[](1);
+        uint256 thresholdWeight = 100;
+
+        operators[0] = makeAddr("operator");
+        signingKeys[0] = makeAddr("signingKey");
+        weights[0] = 200;
+
+        bytes memory message = abi.encode(
+            epochNumber,
+            operators,
+            signingKeys,
+            weights,
+            thresholdWeight
+        );
         bytes32 guid = keccak256("test");
 
         // Should revert when not called by bridge
-        vm.expectRevert(IRegistryStateReceiver.RegistryStateReceiver__InvalidSender.selector);
+        vm.expectRevert(IRegistryStateReceiverErrors.RegistryStateReceiver__InvalidSender.selector);
         stateReceiver.handleMessage(sender, message, guid);
 
         // Should revert when called with wrong sender
         vm.prank(address(mockBridge));
-        vm.expectRevert(IRegistryStateReceiver.RegistryStateReceiver__InvalidSender.selector);
+        vm.expectRevert(IRegistryStateReceiverErrors.RegistryStateReceiver__InvalidSender.selector);
         stateReceiver.handleMessage(makeAddr("wrongSender"), message, guid);
 
         // Should succeed with correct parameters
@@ -70,11 +82,13 @@ contract RegistryStateReceiverTest is Test {
 
         // Should revert on duplicate message
         vm.prank(address(mockBridge));
-        vm.expectRevert(IRegistryStateReceiver.RegistryStateReceiver__MessageAlreadyProcessed.selector);
+        vm.expectRevert(
+            IRegistryStateReceiverErrors.RegistryStateReceiver__MessageAlreadyProcessed.selector
+        );
         stateReceiver.handleMessage(sender, message, guid);
 
         // Verify epoch was updated
-        assertEq(stateReceiver.getCurrentEpoch(), 1);
+        assertEq(stateReceiver.getCurrentUpdatingEpoch(), 1);
     }
 
     function test_UpdateRoute() public {
@@ -89,13 +103,23 @@ contract RegistryStateReceiverTest is Test {
 
     function test_HandleMessage_BatchUpdateFailed() public {
         // Create test data
-        IEpochManager.StateUpdate[] memory updates = new IEpochManager.StateUpdate[](1);
-        updates[0] = IEpochManager.StateUpdate({
-            updateType: IEpochManager.MessageType.REGISTER,
-            data: "test"
-        });
-        
-        bytes memory message = abi.encode(1, updates);
+        uint32 epochNumber = 1;
+        address[] memory operators = new address[](1);
+        address[] memory signingKeys = new address[](1);
+        uint256[] memory weights = new uint256[](1);
+        uint256 thresholdWeight = 100;
+
+        operators[0] = makeAddr("operator");
+        signingKeys[0] = makeAddr("signingKey");
+        weights[0] = 200;
+
+        bytes memory message = abi.encode(
+            epochNumber,
+            operators,
+            signingKeys,
+            weights,
+            thresholdWeight
+        );
         bytes32 guid = keccak256("test");
 
         // Make stake registry revert
@@ -103,7 +127,7 @@ contract RegistryStateReceiverTest is Test {
 
         // Should revert with BatchUpdateFailed
         vm.prank(address(mockBridge));
-        vm.expectRevert(IRegistryStateReceiver.RegistryStateReceiver__BatchUpdateFailed.selector);
+        vm.expectRevert(IRegistryStateReceiverErrors.RegistryStateReceiver__BatchUpdateFailed.selector);
         stateReceiver.handleMessage(sender, message, guid);
     }
-} 
+}

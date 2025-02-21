@@ -9,8 +9,8 @@ remappings = [
     "@eigenlayer-scripts/=lib/eigenlayer-middleware/lib/eigenlayer-contracts/script/",
     "@eigenlayer-middleware/=lib/eigenlayer-middleware/",
     "@credible-squaring/=src/",
-    "@openzeppelin/contracts/=lib/eigenlayer-middleware/lib/eigenlayer-contracts/lib/openzeppelin-contracts/contracts/",
-    "@openzeppelin-upgrades/=lib/eigenlayer-middleware/lib/eigenlayer-contracts/lib/openzeppelin-contracts-upgradeable/",
+    "@openzeppelin/contracts/=lib/eigenlayer-middleware/lib/openzeppelin-contracts/contracts/",
+    "@openzeppelin-upgrades/=lib/eigenlayer-middleware/lib/openzeppelin-contracts-upgradeable/",
     "forge-std/=lib/forge-std/src/",
     "ds-test/=lib/forge-std/lib/ds-test/src/",
     "@layerzerolabs/oapp-evm/=lib/devtools/packages/oapp-evm/",
@@ -28,7 +28,7 @@ optimizer_runs = 1
 # Whether or not to use the Yul intermediate representation compilation pipeline
 via_ir = true
 # Override the Solidity version (this overrides `auto_detect_solc`)
-solc_version = '0.8.26'
+solc_version = '0.8.27'
 
 [fmt]
 bracket_spacing = false

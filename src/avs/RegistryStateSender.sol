@@ -105,27 +105,37 @@ contract RegistryStateSender is IRegistryStateSender, Ownable {
         supportedChainIds.push(_chainId);
     }
 
-    /// @notice Sends batch updates to a target chain
-    /// @param epoch The current epoch number
-    /// @param chainId The ID of the target chain
-    /// @param updates Array of state updates to send
-    /// @dev Only callable by epoch manager, requires sufficient fee
-    function sendBatchUpdates(
+    /// @notice directly send state to target chain
+    /// @param epoch current epoch number
+    /// @param chainId target chain ID
+    /// @param data encoded state data
+    function sendState(
         uint256 epoch,
         uint256 chainId,
-        IEpochManager.StateUpdate[] memory updates
+        bytes memory data
     ) external payable onlyEpochManager {
         BridgeInfo memory bridgeInfo = chainToBridgeInfo[chainId];
-        if (bridgeInfo.bridge == address(0)) revert RegistryStateSender__ChainNotSupported();
+        if (bridgeInfo.bridge == address(0)) {
+            revert RegistryStateSender__ChainNotSupported();
+        }
 
-        bytes memory data = abi.encode(epoch, updates);
+        (, uint256 fee) = IAbridge(bridgeInfo.bridge).estimateFee(
+            bridgeInfo.receiver, 
+            EXECUTE_GAS_LIMIT, 
+            data
+        );
 
-        (, uint256 fee) =
-            IAbridge(bridgeInfo.bridge).estimateFee(bridgeInfo.receiver, EXECUTE_GAS_LIMIT, data);
+        if (msg.value < fee) {
+            revert RegistryStateSender__InsufficientFee();
+        }
 
-        if (msg.value < fee) revert RegistryStateSender__InsufficientFee();
+        IAbridge(bridgeInfo.bridge).send{value: fee}(
+            bridgeInfo.receiver, 
+            EXECUTE_GAS_LIMIT, 
+            data
+        );
 
-        IAbridge(bridgeInfo.bridge).send{value: fee}(bridgeInfo.receiver, EXECUTE_GAS_LIMIT, data);
+        emit StateSent(epoch, chainId);
     }
 
     /// @notice Modifies an existing bridge configuration

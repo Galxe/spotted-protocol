@@ -10,7 +10,7 @@ contract MockAbridge is IAbridge {
 
     // Mapping to track authorized senders
     mapping(address => bool) public authorizedSenders;
-    
+
     // Mapping to track allowed routes
     mapping(address => mapping(address => bool)) private routes;
 
@@ -20,15 +20,23 @@ contract MockAbridge is IAbridge {
     uint128 private lastGasLimit;
     bytes private lastMessage;
 
-    function setShouldRevert(bool _shouldRevert) external {
+    function setShouldRevert(
+        bool _shouldRevert
+    ) external {
         shouldRevert = _shouldRevert;
     }
 
-    function setFee(uint256 _fee) external {
+    function setFee(
+        uint256 _fee
+    ) external {
         fee = _fee;
     }
 
-    function lastSendCall() external view returns (address target, uint128 gasLimit, bytes memory message) {
+    function lastSendCall()
+        external
+        view
+        returns (address target, uint128 gasLimit, bytes memory message)
+    {
         return (lastTarget, lastGasLimit, lastMessage);
     }
 
@@ -69,8 +77,8 @@ contract MockAbridge is IAbridge {
     }
 
     function estimateFee(
-        address /*_receiver*/,
-        uint128 /*_executeGasLimit*/,
+        address, /*_receiver*/
+        uint128, /*_executeGasLimit*/
         bytes memory /*_msg*/
     ) external pure returns (address _token, uint256 _fee) {
         return (address(0), MOCK_FEE);
@@ -90,4 +98,4 @@ contract MockAbridge is IAbridge {
     function emitMessageReceived(address sender, address receiver, bytes32 guid) external {
         emit MessageReceived(sender, receiver, guid);
     }
-} 
+}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.27;
 
 /// @title Epoch Manager Errors Interface
 /// @notice Defines all error cases in the epoch management system

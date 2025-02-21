@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.26;
+pragma solidity ^0.8.27;
 
 import {ILightStakeRegistry} from "../interfaces/ILightStakeRegistry.sol";
 import {IRegistryStateReceiver} from "../interfaces/IRegistryStateReceiver.sol";
